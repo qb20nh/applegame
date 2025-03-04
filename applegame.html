@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Number Game: Make 10</title>
+    <link rel="stylesheet" href="numbergame.min.css">
+</head>
+<body>
+    <h1>Number Game: Make 10</h1>
+    
+    <div class="game-info">
+        <div class="timer">남은 시간: <span id="time">100</span>초</div>
+        <div class="selection-info"><span id="sum">0</span></div>
+        <div class="score">점수: <span id="score">0</span></div>
+    </div>
+    
+    <div id="game-grid" class="game-grid"></div>
+    
+    <div class="game-over" id="game-over">
+        <div class="game-over-content">
+            <h2 id="result-message">게임 종료!</h2>
+            <p>최종 점수: <span id="final-score">0</span></p>
+            <button class="restart-btn" id="restart-btn">다시 시작</button>
+        </div>
+    </div>
+    
+    <script type="module" src="numbergame.min.js">
+    </script>
+</body>
+
+</html>
