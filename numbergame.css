@@ -54,8 +54,6 @@ h1 {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    width: 100%;
-    max-width: calc(var(--cell-size) * var(--grid-cols) + (var(--grid-cols) - 1) * var(--grid-gap) + 2 * var(--grid-padding));
     margin-bottom: 15px;
 }
 
@@ -326,4 +324,9 @@ h1 {
         font-size: 24px;
     }
     
+}
+
+.game-info > div {
+    word-break: keep-all;
+    white-space: nowrap;
 }
