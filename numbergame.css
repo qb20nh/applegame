@@ -37,9 +37,12 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     background-color: var(--color-background);
     margin: 0;
     padding: 20px;
+    min-height: 100vh;
+    box-sizing: border-box;
 }
 
 h1 {
@@ -85,6 +88,8 @@ h1 {
     position: relative; /* 애니메이션을 위해 position 설정 */
     margin: 0 auto; /* 수평 중앙 정렬 */
     place-items: center; /* 그리드 아이템을 중앙에 배치 */
+    max-width: 100%;
+    overflow-x: auto;
 }
 
 .cell {
@@ -106,8 +111,10 @@ h1 {
     overflow: hidden; /* 내용이 넘치는 경우 숨김 */
 }
 
-.cell:not(.empty):hover {
-    box-shadow: inset 0 0 0 3px rgba(51, 51, 51, 0.53);
+@media (hover: hover) {
+    .cell:not(.empty):hover {
+        box-shadow: inset 0 0 0 3px rgba(51, 51, 51, 0.53);
+    }
 }
 
 .cell.selected {
@@ -268,4 +275,55 @@ h1 {
 @keyframes scaleIn {
     from { transform: scale(0.8); opacity: 0; }
     to { transform: scale(1); opacity: 1; }
+}
+
+
+        /* 터치 동작 최적화 */
+        html, body {
+            touch-action: manipulation;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            overscroll-behavior: none;
+        }
+        
+        /* 게임 그리드 최적화 */
+        .game-grid {
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* 셀 스타일 최적화 */
+        .cell {
+            /* 하드웨어 가속 활성화 */
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            
+            /* 선택 효과 스무딩 */
+            transition: background-color 0.05s linear;
+        }
+        
+        .cell.selected {
+            /* 같은 전환 효과 보장 */
+            transition: background-color 0.05s linear;
+        }
+
+/* 모바일 화면 최적화 */
+@media (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+    
+    .game-info {
+        gap: 10px;
+    }
+    
+    .selection-info {
+        margin: 10px 0;
+    }
+    
+    h1 {
+        font-size: 24px;
+    }
+    
 }

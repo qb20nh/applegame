@@ -1,5 +1,20 @@
 import { pseudoPermutation } from './feistel.min.js';
 
+const noop = () => {};
+const IS_LOCALHOST = isLocalhost();
+Object.entries(console).forEach(([name, value]) => {
+    if (typeof value === 'function') {
+        const wrappedFunction = new Proxy(value, {
+            apply(target, thisArg, argumentsList) {
+                const fn = IS_LOCALHOST ? target : noop;
+                return Reflect.apply(fn, thisArg, argumentsList);
+            }
+        })
+        console[name+'_'] = value;
+        console[name] = wrappedFunction;
+    }
+})
+
 // 게임 변수 초기화
 const ROWS = 5;
 const COLS = 10;
@@ -8,8 +23,9 @@ const TIME_LIMIT = 100;
 const CELL_SIZE = 32; // 셀 크기(픽셀)
 const GRID_GAP = 4;   // 그리드 셀 간격(픽셀)
 const GRID_PADDING = 4; // 그리드 패딩(픽셀)
-const HINT_DELAY = 0; // 힌트가 표시되기까지의 시간(ms)
-const HINT_DURATION = 100_000; // 힌트 표시 지속 시간(ms)
+const HINT_DELAY = 5000; // 힌트가 표시되기까지의 시간(ms)
+const HINT_DURATION = 3000; // 힌트 표시 지속 시간(ms)
+const POINTER_TYPE_TOUCH = 'touch'; // 포인터 타입: 터치
 
 let grid = [];
 let selectedCells = [];
@@ -52,6 +68,9 @@ let resultMessageElement = document.getElementById('result-message');
 let gameEndReasonElement = document.getElementById('game-end-reason');
 let finalScoreElement = document.getElementById('final-score');
 let restartBtn = document.getElementById('restart-btn');
+
+// 캐시된 DOM 요소들 - 성능 최적화를 위해 사용
+let cellElements = {}; // 셀 요소 캐시 저장소
 
 // 그리드 CSS 설정 함수
 function setGridCSS() {
@@ -144,7 +163,7 @@ function initDom() {
     // 이벤트 리스너 설정
     restartBtn.addEventListener('click', initGame);
     
-    // 그리드 이벤트 리스너 설정
+    // 그리드 이벤트 리스너 설정 - 포인터 이벤트만 사용
     gameGridElement.addEventListener('pointerdown', startSelection);
     gameGridElement.addEventListener('pointermove', updateSelection);
     gameGridElement.addEventListener('pointerup', endSelection);
@@ -153,7 +172,7 @@ function initDom() {
 }
 
 // 페이지 로드 완료 후 실행
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', () => {
     initDom();
     initGame();
 });
@@ -161,6 +180,9 @@ document.addEventListener('DOMContentLoaded', function() {
 // 그리드 렌더링
 function renderGrid() {
     gameGridElement.innerHTML = '';
+    
+    // DOM 요소 캐시 초기화
+    cellElements = {};
     
     for (let i = 0; i < ROWS; i++) {
         for (let j = 0; j < COLS; j++) {
@@ -170,16 +192,18 @@ function renderGrid() {
             cellElement.dataset.row = i;
             cellElement.dataset.col = j;
             
+            // 셀 요소 캐싱 (성능 최적화)
+            const cellId = `${i}-${j}`;
+            cellElements[cellId] = cellElement;
+            
             if (cell && cell.value > 0) {
                 cellElement.textContent = cell.value;
                 
                 // 레이어 색상 클래스 추가 
                 cellElement.classList.add(`${cell.color}-layer`);
                 
-                // 셀 이벤트 추가
-                cellElement.addEventListener('mousedown', startSelection);
-                cellElement.addEventListener('mouseenter', updateSelection);
-                cellElement.addEventListener('mouseup', endSelection);
+                // 개별 셀에 이벤트 리스너 추가하지 않음
+                // (그리드 레벨 포인터 이벤트만 사용)
             } else {
                 cellElement.classList.add('empty');
                 emptyCellCount++; // 비어있는 셀 카운트 증가
@@ -188,28 +212,32 @@ function renderGrid() {
             gameGridElement.appendChild(cellElement);
         }
     }
-    
-    // 글로벌 이벤트 리스너 추가
-    document.addEventListener('mouseup', () => {
-        if (isSelecting) endSelection();
-    });
 }
 
 // 선택 시작
 function startSelection(e) {
-    if (timeLeft <= 0) return; // 애니메이션 체크 제거
+    if (timeLeft <= 0) return;
     
     isSelecting = true;
-    selectionStartCell = {
-        row: parseInt(e.target.dataset.row),
-        col: parseInt(e.target.dataset.col)
-    };
+    
+    // 포인터 캡처 설정 (드래그 추적 개선) - 터치 입력에만 적용
+    if (e.pointerType === POINTER_TYPE_TOUCH && e.target.hasPointerCapture && e.pointerId) {
+        try {
+            e.target.setPointerCapture(e.pointerId);
+        } catch (error) {
+            console.warn('포인터 캡처 설정 실패:', error);
+        }
+    }
+    
+    // 셀 좌표 계산
+    const targetElement = e.target;
+    selectionStartCell = targetElement.classList.contains('cell') ? {
+        row: parseInt(targetElement.dataset.row, 10),
+        col: parseInt(targetElement.dataset.col, 10)
+    } : getCellCoordinatesFromPosition(e.clientX, e.clientY);
     
     clearSelection();
     selectCellsInRange(selectionStartCell, selectionStartCell);
-    
-    // 전체 문서에 mousemove 이벤트 리스너 추가
-    document.addEventListener('mousemove', updateSelectionFromPosition);
 }
 
 // 마우스 위치로부터 셀 좌표 계산
@@ -231,41 +259,45 @@ function getCellCoordinatesFromPosition(x, y) {
     return { row, col };
 }
 
-// 마우스 위치에 따라 선택 영역 업데이트
-function updateSelectionFromPosition(e) {
-    if (!isSelecting || timeLeft <= 0) return; // 애니메이션 체크 제거
-    
-    const currentCell = getCellCoordinatesFromPosition(e.clientX, e.clientY);
-    selectionEndCell = currentCell; // 선택 종료 셀 업데이트
-    clearSelection();
-    selectCellsInRange(selectionStartCell, currentCell);
-}
-
-// 선택 업데이트 (셀에서 직접 호출되는 경우)
+// 포인터 이동에 따른 선택 영역 업데이트 (pointermove 이벤트 핸들러)
 function updateSelection(e) {
-    if (!isSelecting || timeLeft <= 0) return; // 애니메이션 체크 제거
+    if (!isSelecting || timeLeft <= 0) return;
     
-    const currentCell = {
-        row: parseInt(e.target.dataset.row),
-        col: parseInt(e.target.dataset.col)
-    };
+    // 셀 좌표 계산 (효율적인 방식)
+    const currentCell = getCellCoordinatesFromPosition(e.clientX, e.clientY);
     
-    selectionEndCell = currentCell; // 선택 종료 셀 업데이트
-    clearSelection();
-    selectCellsInRange(selectionStartCell, currentCell);
+    // 셀 위치가 변경된 경우만 업데이트 - 불필요한 DOM 업데이트 방지
+    if (!selectionEndCell || 
+        currentCell.row !== selectionEndCell.row || 
+        currentCell.col !== selectionEndCell.col) {
+        
+        selectionEndCell = currentCell;
+        selectCellsInRange(selectionStartCell, currentCell);
+    }
 }
 
 // 선택 종료
-function endSelection() {
-    if (!isSelecting || timeLeft <= 0) return; // 애니메이션 체크 제거
+function endSelection(e) {
+    if (!isSelecting || timeLeft <= 0) return;
     
     isSelecting = false;
     
-    // mousemove 이벤트 리스너 제거
-    document.removeEventListener('mousemove', updateSelectionFromPosition);
+    // 포인터 캡처 해제 - 터치 입력 및 유효한 이벤트에만 적용
+    if (e && e.pointerType === POINTER_TYPE_TOUCH && e.pointerId && 
+        e.target && e.target.hasPointerCapture) {
+        try {
+            // hasPointerCapture 메서드가 존재하고 해당 포인터가 캡처된 경우에만 해제
+            if (typeof e.target.hasPointerCapture === 'function' && 
+                e.target.hasPointerCapture(e.pointerId)) {
+                e.target.releasePointerCapture(e.pointerId);
+            }
+        } catch (error) {
+            console.warn('포인터 캡처 해제 실패:', error);
+        }
+    }
     
     // 선택된 셀이 없으면 종료
-    if (selectedCells.length === 0) {
+    if (!selectedCells || selectedCells.length === 0) {
         clearSelection();
         return;
     }
@@ -358,8 +390,7 @@ function endSelection() {
 
 // 범위 내의 셀 선택 (같은 색상만 허용)
 function selectCellsInRange(startCell, endCell) {
-    selectedCells = [];
-    
+    // 범위 계산
     const minRow = Math.min(startCell.row, endCell.row);
     const maxRow = Math.max(startCell.row, endCell.row);
     const minCol = Math.min(startCell.col, endCell.col);
@@ -371,19 +402,25 @@ function selectCellsInRange(startCell, endCell) {
     // 선택 영역의 너비와 높이 계산
     const selectionWidth = maxCol - minCol + 1;
     const selectionHeight = maxRow - minRow + 1;
-    // 현재 선택 영역의 정보를 저장
     currentSelectionSize = {
         width: selectionWidth,
         height: selectionHeight
     };
     
+    // 현재 선택될 셀과 이전에 선택된 셀의 차이 계산
+    const newSelectedIds = new Set();
+    const newSelectedCells = [];
+    
+    // 새로 선택될 셀 식별
     for (let i = minRow; i <= maxRow; i++) {
         for (let j = minCol; j <= maxCol; j++) {
-            // 셀이 존재하고, 값이 있고, 시작 셀과 색상이 같은 경우만 선택
+            // 유효한 셀이고 같은 색상인지 확인
             if (grid[i][j] && grid[i][j].value > 0 && grid[i][j].color === startCellColor) {
-                const cellElement = document.querySelector(`.cell[data-row="${i}"][data-col="${j}"]`);
-                cellElement.classList.add('selected');
-                selectedCells.push({
+                const cellId = `${i}-${j}`;
+                newSelectedIds.add(cellId);
+                
+                // 선택된 셀 정보 추가
+                newSelectedCells.push({
                     row: i, 
                     col: j, 
                     value: grid[i][j].value,
@@ -394,15 +431,54 @@ function selectCellsInRange(startCell, endCell) {
         }
     }
     
+    // 이전에 선택된 셀 중 선택 취소해야 할 셀 식별
+    const currentSelectedIds = selectedCells.map(cell => `${cell.row}-${cell.col}`);
+    
+    // 1. 이전에 선택된 셀 중 선택 취소해야 할 셀 선택 해제
+    for (const id of currentSelectedIds) {
+        if (!newSelectedIds.has(id)) {
+            const cell = cellElements[id];
+            if (cell) {
+                cell.classList.remove('selected');
+            }
+        }
+    }
+    
+    // 2. 새로 선택해야 할 셀 선택 추가
+    for (const id of newSelectedIds) {
+        if (!currentSelectedIds.includes(id)) {
+            const cell = cellElements[id];
+            if (cell) {
+                cell.classList.add('selected');
+            }
+        }
+    }
+    
+    // 선택된 셀 목록 업데이트
+    selectedCells = newSelectedCells;
+    
+    // 합계 계산하여 UI 업데이트
     updateUI();
 }
 
 // 선택 해제
 function clearSelection() {
-    document.querySelectorAll('.cell.selected').forEach(cell => {
-        cell.classList.remove('selected');
-    });
+    // 선택된 셀이 없으면 불필요한 작업 방지
+    if (selectedCells.length === 0) return;
+    
+    // 선택된 모든 셀에서 선택 클래스 제거
+    for (const cell of selectedCells) {
+        const cellId = `${cell.row}-${cell.col}`;
+        const cellElement = cellElements[cellId];
+        if (cellElement) {
+            cellElement.classList.remove('selected');
+        }
+    }
+    
+    // 선택된 셀 배열 초기화
     selectedCells = [];
+    
+    // UI 업데이트
     updateUI();
 }
 
@@ -418,9 +494,6 @@ function revealNextLayerWithAnimation() {
     // 현재 남은 힌트의 수 파악
     const hints = findHints();
     const hintsCount = hints.length;
-    
-    // 애니메이션 카운터
-    const totalCells = selectedCells.length;
     
     // 게임 상태 변경 표시 (힌트 캐시 무효화)
     gameStateChanged = true;
@@ -514,11 +587,13 @@ function revealNextLayerWithAnimation() {
                 
             // 클론 생성 (사라지는 애니메이션용)
             const cellClone = cellElement.cloneNode(true);
-            cellClone.style.position = 'absolute';
-            cellClone.style.left = `${rect.left - gridRect.left}px`;
-            cellClone.style.top = `${rect.top - gridRect.top}px`;
+            cellClone.style.position = 'fixed';
+            cellClone.style.left = `${rect.left}px`;
+            cellClone.style.top = `${rect.top}px`;
+            cellClone.style.zIndex = '1000';
+            cellClone.style.pointerEvents = 'none';
             cellClone.classList.add('falling');
-            gameGridElement.appendChild(cellClone);
+            document.body.appendChild(cellClone);
                 
                 
             // DOM 요소 업데이트
@@ -973,12 +1048,14 @@ function updateUI() {
 // 타이머 업데이트
 function updateTimer() {
     timeLeft -= 0.1;
-    updateUI();
     
     if (timeLeft <= 0) {
+        timeLeft = 0;
         clearInterval(gameTimer);
         endGame(false);
     }
+
+    updateUI();
 }
 
 // 게임 종료
@@ -990,17 +1067,15 @@ function endGame(isWin, message = '') {
     resultMessageElement.textContent = '게임 종료!';
     
     // 종료 사유 설정
-    if (!message) {
-        if (isWin) {
-            gameEndReasonElement.textContent = '모든 레이어를 파헤쳤습니다!';
-        } else if (timeLeft <= 0) {
-            gameEndReasonElement.textContent = '시간 제한에 도달했습니다.';
-        } else {
-            gameEndReasonElement.textContent = '게임이 종료되었습니다.';
-        }
-    } else {
+    if (message) {
         // 메시지가 제공된 경우 그대로 사용
         gameEndReasonElement.textContent = message;
+    } else if (isWin) {
+        gameEndReasonElement.textContent = '모든 레이어를 파헤쳤습니다!';
+    } else if (timeLeft <= 0) {
+        gameEndReasonElement.textContent = '시간 제한에 도달했습니다.';
+    } else {
+        gameEndReasonElement.textContent = '게임이 종료되었습니다.';
     }
     
     // 점수 표시 및 게임 오버 화면 표시
@@ -1062,3 +1137,28 @@ function generateBenfordNumber() {
     // 반올림 오차로 여기까지 오면 9 반환
     return 1;
 }
+
+function isLocalhost() {
+    // Get the hostname from the current URL.
+    const hostname = window.location.hostname;
+  
+    // If hostname is empty (e.g. when using file:// protocol), treat as local.
+    if (!hostname) return true;
+  
+    // 1. Standard hostname for localhost.
+    if (hostname === 'localhost') return true;
+  
+    // 2. IPv6 localhost addresses.
+    // Some browsers might return either "[::1]" or "::1".
+    if (hostname === '[::1]' || hostname === '::1') return true;
+  
+    // 3. IPv4 loopback addresses.
+    // According to IPv4 standards, any address in the 127.0.0.0/8 block is loopback.
+    // This regular expression strictly matches numbers between 0 and 255.
+    const ipv4LoopbackRegex = /^127(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d?\d)){3}$/;
+    if (ipv4LoopbackRegex.test(hostname)) return true;
+  
+    // If none of the conditions are met, it's not considered localhost.
+    return false;
+  }
+  
