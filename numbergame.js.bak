@@ -1166,86 +1166,12 @@ function isLocalhost() {
 // 스테이지 선택 다이얼로그 관련 코드
 const stageDialog = document.getElementById('stage-selection-dialog');
 const closeStageButton = document.getElementById('close-stage-selection');
-const stagesContainer = document.querySelector('.stages-container');
+const stageItems = document.querySelectorAll('.stage-item.completed');
 const stageNumberElement = document.querySelector('#stage-number .stage-number');
-const stageTemplate = document.getElementById('stage-template');
-const prevPageButton = document.getElementById('prev-page');
-const nextPageButton = document.getElementById('next-page');
-const pageDisplay = document.getElementById('page-display');
-const pageNumbersContainer = document.querySelector('.page-numbers');
-
-// 페이지네이션 변수
-let currentPage = 1;
-const totalPages = 10;
-const stagesPerPage = 100;
 
 // 다이얼로그 표시 함수
 function showStageSelection() {
-    // 처음 열 때만 페이지 초기화
-    if (stagesContainer.children.length === 0) {
-        initPagination();
-        generateStages();
-    }
     stageDialog.showModal();
-}
-injectGlobal(showStageSelection);
-
-// 페이지네이션 초기화 함수
-function initPagination() {
-    // 페이지 번호 버튼 생성
-    pageNumbersContainer.innerHTML = '';
-    for (let i = 1; i <= totalPages; i++) {
-        const pageNumberBtn = document.createElement('div');
-        pageNumberBtn.className = 'page-number' + (i === currentPage ? ' active' : '');
-        pageNumberBtn.textContent = i;
-        pageNumberBtn.addEventListener('click', () => {
-            if (i !== currentPage) {
-                changePage(i);
-            }
-        });
-        pageNumbersContainer.appendChild(pageNumberBtn);
-    }
-    
-    // 이전/다음 페이지 버튼 이벤트 리스너
-    prevPageButton.addEventListener('click', () => {
-        if (currentPage > 1) {
-            changePage(currentPage - 1);
-        }
-    });
-    
-    nextPageButton.addEventListener('click', () => {
-        if (currentPage < totalPages) {
-            changePage(currentPage + 1);
-        }
-    });
-    
-    // 초기 페이지 상태 업데이트
-    updatePageControls();
-}
-
-// 페이지 변경 함수
-function changePage(newPage) {
-    if (newPage < 1 || newPage > totalPages) return;
-    
-    currentPage = newPage;
-    updatePageControls();
-    generateStages();
-}
-
-// 페이지 컨트롤 업데이트 함수
-function updatePageControls() {
-    // 페이지 표시 업데이트
-    pageDisplay.textContent = `페이지 ${currentPage}/${totalPages}`;
-    
-    // 이전/다음 버튼 활성화/비활성화
-    prevPageButton.disabled = currentPage === 1;
-    nextPageButton.disabled = currentPage === totalPages;
-    
-    // 페이지 번호 버튼 활성화 상태 업데이트
-    const pageNumberButtons = pageNumbersContainer.querySelectorAll('.page-number');
-    pageNumberButtons.forEach((btn, index) => {
-        btn.classList.toggle('active', index + 1 === currentPage);
-    });
 }
 
 // 닫기 버튼 클릭 시 다이얼로그 닫기
@@ -1253,90 +1179,26 @@ closeStageButton.addEventListener('click', () => {
     stageDialog.close();
 });
 
-// 클릭 이벤트가 다이얼로그 바깥쪽에서 발생하면 닫기
+// 클릭 이벤트가 모달 바깥쪽에서 발생하면 닫기
 stageDialog.addEventListener('click', (e) => {
     if (e.target === stageDialog) {
         stageDialog.close();
     }
 });
 
-// 스테이지 데이터 (임시 데이터, 실제로는 로컬 스토리지나 서버에서 가져올 수 있음)
-const stageData = {
-    totalStages: 1000,                // 1000개 스테이지로 변경
-    completedStages: 15,              // 완료된 스테이지 수
-    stageScores: {},                  // 각 스테이지별 최고 점수
-    initializeScores() {              // 테스트용 점수 초기화 함수
-        for (let i = 1; i <= this.completedStages; i++) {
-            // 무작위 점수 생성 (400~1500)
-            this.stageScores[i] = Math.floor(Math.random() * 1100) + 400;
-        }
-    }
-};
+// 스테이지 선택 이벤트 처리
+stageItems.forEach(item => {
+    item.addEventListener('click', () => {
+        const stageNumber = item.getAttribute('data-stage');
+        stageNumberElement.textContent = stageNumber;
+        // 스테이지 데이터 설정 및 게임 로직 연결 부분 (구현 필요)
+        console.log(`스테이지 ${stageNumber} 선택됨`);
+        stageDialog.close();
+        // 게임 재시작 로직 호출 (구현 필요)
+        // initGame();
+    });
+});
 
-// 테스트용 점수 초기화
-stageData.initializeScores();
-
-// 별점 계산 함수 (0-3개 별)
-function calculateStars(score) {
-    if (score >= 1200) return '★★★';
-    if (score >= 800) return '★★☆';
-    return '★☆☆';
-}
-
-// 스테이지 타일 동적 생성 함수
-function generateStages() {
-    // 스테이지 컨테이너 비우기
-    stagesContainer.innerHTML = '';
-    
-    // 현재 페이지에 해당하는 스테이지 범위 계산
-    const startStage = (currentPage - 1) * stagesPerPage + 1;
-    const endStage = Math.min(currentPage * stagesPerPage, stageData.totalStages);
-    
-    // 현재 페이지의 스테이지 생성
-    for (let i = startStage; i <= endStage; i++) {
-        const isCompleted = i <= stageData.completedStages;
-        const isUnlocked = i <= stageData.completedStages + 1;
-        
-        // 템플릿 복제
-        const stageItem = stageTemplate.content.cloneNode(true).querySelector('.stage-item');
-        
-        // 스테이지 상태 설정
-        stageItem.classList.add(isUnlocked ? 'completed' : 'locked');
-        stageItem.setAttribute('data-stage', i);
-        
-        // 스테이지 번호 설정
-        const stageNumber = stageItem.querySelector('.stage-number');
-        stageNumber.textContent = i;
-        
-        // 별점 설정 (완료된 스테이지만)
-        const stars = stageItem.querySelector('.stars');
-        if (isCompleted && stageData.stageScores[i]) {
-            stars.textContent = calculateStars(stageData.stageScores[i]);
-        } else {
-            stars.style.display = 'none';
-        }
-        
-        // 완료된 스테이지에만 클릭 이벤트 추가
-        if (isUnlocked) {
-            stageItem.addEventListener('click', function() {
-                selectStage(i);
-            });
-        }
-        
-        // 컨테이너에 추가
-        stagesContainer.appendChild(stageItem);
-    }
-}
-
-// 스테이지 선택 처리 함수
-function selectStage(stageNumber) {
-    stageNumberElement.textContent = stageNumber;
-    console.log(`스테이지 ${stageNumber} 선택됨`);
-    stageDialog.close();
-    // 선택한 스테이지로 게임 초기화 (구현 필요)
-    // initGame();
-}
-
-function injectGlobal(func) {
-    globalThis[func.name] = func;
-}
+// 초기화 시 또는 게임 시작 화면에서 스테이지 선택 다이얼로그 표시
+// 예: showStageSelection();
+  

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Make 10</title>
-    <link rel="stylesheet" href="numbergame.min.css">
+    <link rel="stylesheet" href="numbergame.css">
 </head>
 <body>
     <h1>Make 10</h1>
@@ -15,6 +15,37 @@
         <div class="score">📊 <span id="score">0</span></div>
     </div>
     
+    <!-- 스테이지 타일 템플릿 -->
+    <template id="stage-template">
+        <div class="stage-item" data-stage="">
+            <div class="stage-number"></div>
+            <div class="stars"></div>
+        </div>
+    </template>
+    
+    <!-- 스테이지 선택 다이얼로그 -->
+    <dialog id="stage-selection-dialog" class="stage-dialog">
+        <div class="dialog-content">
+            <h2>스테이지 선택</h2>
+            <div class="page-info">
+                <span id="page-display">페이지 1/10</span>
+            </div>
+            <div class="stages-container">
+                <!-- 스테이지 타일들은 JavaScript로 동적 생성 -->
+            </div>
+            <div class="pagination">
+                <button id="prev-page" class="page-btn">&lt;</button>
+                <div class="page-numbers">
+                    <!-- 페이지 번호는 JavaScript로 동적 생성 -->
+                </div>
+                <button id="next-page" class="page-btn">&gt;</button>
+            </div>
+            <div class="dialog-buttons">
+                <button id="close-stage-selection" class="dialog-close-btn">닫기</button>
+            </div>
+        </div>
+    </dialog>
+
     <div id="game-grid" class="game-grid"></div>
     
     <div class="game-over" id="game-over">
@@ -27,7 +58,8 @@
         </div>
     </div>
     
-    <script type="module" src="numbergame.min.js">
+    <div id="stage-number">Stage <span class="stage-number">1</span></div>
+    <script type="module" src="numbergame.js">
     </script>
 </body>
 

@@ -330,3 +330,245 @@ h1 {
     word-break: keep-all;
     white-space: nowrap;
 }
+
+#stage-number {
+    margin-top: 8px;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+/* 스테이지 선택 다이얼로그 스타일 */
+.stage-dialog {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background-color: transparent;
+}
+
+.stage-dialog:modal {
+    max-width: 100dvw;
+    max-height: 100dvh;
+    width: 100dvw;
+    height: 100dvh;
+}
+
+.stage-dialog::backdrop {
+    background-color: #000;
+}
+
+.dialog-content {
+    background-color: #f0f0f0;
+    padding: 20px;
+    max-height: 100dvh;
+    overflow-y: auto;
+}
+
+.dialog-content h2 {
+    text-align: center;
+    margin-bottom: 20px;
+    color: #333;
+    font-size: 24px;
+}
+
+.stages-container {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 8px;
+    margin-bottom: 20px;
+    max-height: 80dvh;
+    overflow-y: auto;
+}
+
+.stage-item {
+    background: #e0e0e0;
+    border-radius: 100%;
+    aspect-ratio: 1/1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    color: #333;
+    padding: 5px;
+}
+
+.stage-item.completed {
+    background: linear-gradient(135deg, #ff9966, #ff5e62);
+    color: white;
+    cursor: pointer;
+}
+
+.stage-item.completed:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.stage-item.locked {
+    background: linear-gradient(135deg, #e0e0e0, #c0c0c0);
+    color: #888;
+    cursor: not-allowed;
+}
+
+.stage-number {
+    font-size: 20px;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.stars {
+    line-height: 1;
+    font-size: 16px;
+    color: gold;
+    text-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
+    letter-spacing: -1px;
+    text-shadow: 1px 1px 0 #0008;
+}
+
+.dialog-buttons {
+    display: flex;
+    justify-content: center;
+    margin-top: 15px;
+}
+
+.dialog-close-btn {
+    padding: 8px 25px;
+    background-color: #333;
+    color: white;
+    border: none;
+    border-radius: 30px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.dialog-close-btn:hover {
+    background-color: #555;
+}
+
+@media (max-width: 768px) {
+    .stage-dialog {
+        width: 95%;
+    }
+
+    .dialog-content {
+        padding: 15px;
+    }
+
+    .stages-container {
+        grid-template-columns: repeat(5, 1fr);
+        gap: 6px;
+    }
+
+    .stage-number {
+        font-size: 12px;
+    }
+
+    .stars {
+        font-size: 9px;
+    }
+
+    .dialog-content h2 {
+        font-size: 18px;
+        margin-bottom: 15px;
+    }
+    
+    /* 페이지네이션 모바일 대응 */
+    .pagination {
+        margin: 10px 0;
+        gap: 4px;
+    }
+    
+    .page-numbers {
+        gap: 3px;
+        margin: 0 4px;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: 180px;
+    }
+    
+    .page-number {
+        width: 22px;
+        height: 22px;
+        font-size: 10px;
+    }
+    
+    .page-btn {
+        width: 25px;
+        height: 25px;
+        font-size: 12px;
+    }
+}
+
+/* 페이지네이션 스타일 */
+.page-info {
+    text-align: center;
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: #666;
+}
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 15px 0;
+    gap: 8px;
+}
+
+.page-btn {
+    background-color: #eee;
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    font-size: 14px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.page-btn:hover:not(:disabled) {
+    background-color: #ddd;
+    transform: scale(1.1);
+}
+
+.page-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.page-numbers {
+    display: flex;
+    gap: 5px;
+    margin: 0 8px;
+}
+
+.page-number {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background-color: #eee;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.page-number:hover {
+    background-color: #ddd;
+}
+
+.page-number.active {
+    background-color: #ff9966;
+    color: white;
+    font-weight: bold;
+}
