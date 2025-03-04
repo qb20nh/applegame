@@ -16,8 +16,9 @@ Object.entries(console).forEach(([name, value]) => {
 })
 
 // 게임 변수 초기화
-const ROWS = 5;
-const COLS = 10;
+const aspect = screen.availWidth / screen.availHeight;
+const ROWS = aspect > 1 ? 5 : 10;
+const COLS = aspect > 1 ? 10 : 5;
 const TARGET_SUM = 10;
 const TIME_LIMIT = 100;
 const CELL_SIZE = 32; // 셀 크기(픽셀)
@@ -94,7 +95,7 @@ function initGame() {
         for (let j = 0; j < COLS; j++) {
             // 각 셀에 값, 레이어 깊이, 색상 정보 추가
             // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색으로 시작
-            const isRightHalf = j >= COLS / 2; // 오른쪽 절반 여부 확인
+            const isRightHalf = aspect > 1 ? j >= COLS / 2 : i >= ROWS / 2; // 오른쪽 절반 여부 확인
             
             row.push({
                 value: Math.floor(generateBenfordNumber()), // 1부터 9까지 랜덤 숫자 생성
