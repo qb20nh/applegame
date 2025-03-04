@@ -20,12 +20,14 @@
     <div class="game-over" id="game-over">
         <div class="game-over-content">
             <h2 id="result-message">게임 종료!</h2>
-            <p>최종 점수: <span id="final-score">0</span></p>
-            <button class="restart-btn" id="restart-btn">다시 시작</button>
+            <p id="game-end-reason" class="game-end-reason"></p>
+            <p>최종 점수:</p>
+            <div class="score-display" id="final-score">0</div>
+            <button class="restart-btn" id="restart-btn">새 게임 시작</button>
         </div>
     </div>
     
-    <script type="module" src="numbergame.min.js">
+    <script type="module" src="numbergame.js">
     </script>
 </body>
 

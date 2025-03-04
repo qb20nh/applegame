@@ -1,21 +1,20 @@
-
 import { pseudoPermutation } from './feistel.min.js';
 
 // 게임 변수 초기화
-const ROWS = 10;
-const COLS = 20;
+const ROWS = 5;
+const COLS = 10;
 const TARGET_SUM = 10;
-const GAME_TIME = 100;
+const TIME_LIMIT = 100;
 const CELL_SIZE = 32; // 셀 크기(픽셀)
 const GRID_GAP = 4;   // 그리드 셀 간격(픽셀)
 const GRID_PADDING = 4; // 그리드 패딩(픽셀)
-const HINT_DELAY = 5000; // 힌트가 표시되기까지의 시간(ms)
-const HINT_DURATION = 2000; // 힌트 표시 지속 시간(ms)
+const HINT_DELAY = 0; // 힌트가 표시되기까지의 시간(ms)
+const HINT_DURATION = 100_000; // 힌트 표시 지속 시간(ms)
 
 let grid = [];
 let selectedCells = [];
 let score = 0;
-let timeLeft = GAME_TIME;
+let timeLeft = TIME_LIMIT;
 let gameTimer;
 let isSelecting = false;
 let selectionStartCell = null;
@@ -36,7 +35,6 @@ let lastShownHintIndex = -1; // 마지막으로 표시된 힌트의 인덱스
 
 // 레이어 시스템을 위한 변수
 const COLORS = ['orange', 'blue']; // 색상 순환 배열
-let maxLayerDepth = 0; // 현재까지의 최대 레이어 깊이 (게임 종료 조건으로 활용 가능)
 
 // 누적 합 테이블을 전역 변수로 저장 (그리드 상태 변화에 따라 점진적으로 업데이트)
 let prefixSumTable = null;
@@ -45,14 +43,15 @@ let orangePrefixSumTable = null;
 let bluePrefixSumTable = null;
 
 // DOM 요소
-const gameGridElement = document.getElementById('game-grid');
-const timeElement = document.getElementById('time');
-const scoreElement = document.getElementById('score');
-const sumElement = document.getElementById('sum');
-const gameOverElement = document.getElementById('game-over');
-const resultMessageElement = document.getElementById('result-message');
-const finalScoreElement = document.getElementById('final-score');
-const restartBtn = document.getElementById('restart-btn');
+let gameGridElement = document.getElementById('game-grid');
+let timeElement = document.getElementById('time');
+let scoreElement = document.getElementById('score');
+let sumElement = document.getElementById('sum');
+let gameOverElement = document.getElementById('game-over');
+let resultMessageElement = document.getElementById('result-message');
+let gameEndReasonElement = document.getElementById('game-end-reason');
+let finalScoreElement = document.getElementById('final-score');
+let restartBtn = document.getElementById('restart-btn');
 
 // 그리드 CSS 설정 함수
 function setGridCSS() {
@@ -75,10 +74,11 @@ function initGame() {
         const row = [];
         for (let j = 0; j < COLS; j++) {
             // 각 셀에 값, 레이어 깊이, 색상 정보 추가
-            // 오른쪽 100개 셀은 파란색, 왼쪽 100개 셀은 주황색으로 시작
+            // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색으로 시작
             const isRightHalf = j >= COLS / 2; // 오른쪽 절반 여부 확인
+            
             row.push({
-                value: Math.floor(Math.random() * 9) + 1, // 1부터 9까지 랜덤 숫자 생성
+                value: Math.floor(generateBenfordNumber()), // 1부터 9까지 랜덤 숫자 생성
                 layerDepth: isRightHalf ? 1 : 0, // 초기 레이어 깊이
                 color: isRightHalf ? COLORS[1] : COLORS[0] // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색
             });
@@ -92,11 +92,10 @@ function initGame() {
     // 게임 변수 초기화
     selectedCells = [];
     score = 0;
-    timeLeft = GAME_TIME;
+    timeLeft = TIME_LIMIT;
     emptyCellCount = 0;
     selectionStartCell = null;
     selectionEndCell = null;  // 선택 종료 셀 초기화
-    maxLayerDepth = 0; // 최대 레이어 깊이 초기화
     
     // 힌트 관련 변수 초기화
     clearTimeout(hintTimer);
@@ -124,6 +123,40 @@ function initGame() {
     // 힌트 미리 계산하기 - 상태 변경 후 즉시 실행하여 응답성 향상
     precomputeHints();
 }
+
+// DOM 초기화 및 게임 오버 화면 생성
+function initDom() {
+    // 게임 그리드 요소 참조
+    gameGridElement = document.getElementById('game-grid');
+    
+    // 게임 정보 UI 요소
+    timeElement = document.getElementById('time');
+    scoreElement = document.getElementById('score');
+    sumElement = document.getElementById('sum');
+    
+    // 게임 오버 화면 요소
+    gameOverElement = document.getElementById('game-over');
+    resultMessageElement = document.getElementById('result-message');
+    gameEndReasonElement = document.getElementById('game-end-reason');
+    finalScoreElement = document.getElementById('final-score');
+    restartBtn = document.getElementById('restart-btn');
+    
+    // 이벤트 리스너 설정
+    restartBtn.addEventListener('click', initGame);
+    
+    // 그리드 이벤트 리스너 설정
+    gameGridElement.addEventListener('pointerdown', startSelection);
+    gameGridElement.addEventListener('pointermove', updateSelection);
+    gameGridElement.addEventListener('pointerup', endSelection);
+    gameGridElement.addEventListener('pointercancel', endSelection);
+    gameGridElement.addEventListener('pointerleave', endSelection);
+}
+
+// 페이지 로드 완료 후 실행
+document.addEventListener('DOMContentLoaded', function() {
+    initDom();
+    initGame();
+});
 
 // 그리드 렌더링
 function renderGrid() {
@@ -301,8 +334,6 @@ function endSelection() {
         revealNextLayerWithAnimation();
         
         score += pointsEarned;
-
-        timeLeft += pointsEarned;
         console.log(`${pointsEarned} 점수 획득! ${pointsEarned}초 추가되었습니다.`);
         
         updateUI();
@@ -384,8 +415,11 @@ function calculateSum() {
 function revealNextLayerWithAnimation() {
     if (selectedCells.length === 0) return;
     
+    // 현재 남은 힌트의 수 파악
+    const hints = findHints();
+    const hintsCount = hints.length;
+    
     // 애니메이션 카운터
-    let animationCount = 0;
     const totalCells = selectedCells.length;
     
     // 게임 상태 변경 표시 (힌트 캐시 무효화)
@@ -434,9 +468,39 @@ function revealNextLayerWithAnimation() {
     
     // 셀을 하나씩 애니메이션으로 레이어 변경
     cellsToReveal.forEach((cell, index) => {
+        // 그리드 데이터에서 현재 셀 정보 확인
+        const currentCell = grid[cell.row][cell.col];
+        // 레이어 깊이 증가
+        const newLayerDepth = currentCell.layerDepth + 1;
+            
+        // 새 레이어 색상 결정 (교대로 주황/파랑)
+        const newColor = COLORS[newLayerDepth % COLORS.length];
+        
+        // 남은 힌트 수에 따라 1/sqrt(hintsCount) 확률로 벤포드 법칙 사용
+        let newValue;
+        
+        // 힌트가 적을수록 벤포드 법칙을 사용할 확률 증가
+        // hintsCount가 0이면 무조건 벤포드 법칙 사용 (게임 진행을 위해)
+        const useBenfordProbability = hintsCount <= 1 ? 1 : 1 / Math.sqrt(hintsCount);
+        
+        if (Math.random() < useBenfordProbability) {
+            // 벤포드 법칙 사용
+            newValue = generateBenfordNumber();
+            console.log(`벤포드 법칙 적용 (힌트 수: ${hintsCount}, 확률: ${(useBenfordProbability * 100).toFixed(2)}%) - 생성된 값: ${newValue}`);
+        } else {
+            // 기존 방식 사용
+            const position = cell.row * COLS + cell.col;
+            newValue = (pseudoPermutation(200*9, position, 4, newLayerDepth) % 9) + 1; // 1~9 범위
+        }
+            
+        // 그리드 데이터 업데이트
+        grid[cell.row][cell.col] = {
+            value: newValue,
+            layerDepth: newLayerDepth,
+            color: newColor
+        };
+        
         setTimeout(() => {
-            // 그리드 데이터에서 현재 셀 정보 확인
-            const currentCell = grid[cell.row][cell.col];
             
             // 현재 셀의 DOM 요소 찾기
             const cellElement = document.querySelector(`.cell[data-row="${cell.row}"][data-col="${cell.col}"]`);
@@ -456,24 +520,6 @@ function revealNextLayerWithAnimation() {
             cellClone.classList.add('falling');
             gameGridElement.appendChild(cellClone);
                 
-            // 레이어 깊이 증가
-            const newLayerDepth = currentCell.layerDepth + 1;
-            maxLayerDepth = Math.max(maxLayerDepth, newLayerDepth);
-                
-            // 새 레이어 색상 결정 (교대로 주황/파랑)
-            const newColor = COLORS[newLayerDepth % COLORS.length];
-                
-            // Feistel 암호화로 새 값 생성
-            // 위치를 하나의 숫자로 변환: position = row * COLS + col
-            const position = cell.row * COLS + cell.col;
-            const newValue = (pseudoPermutation(200, position, 4, newLayerDepth) % 9) + 1; // 1~9 범위
-                
-            // 그리드 데이터 업데이트
-            grid[cell.row][cell.col] = {
-                value: newValue,
-                layerDepth: newLayerDepth,
-                color: newColor
-            };
                 
             // DOM 요소 업데이트
             cellElement.textContent = newValue;
@@ -507,23 +553,15 @@ function revealNextLayerWithAnimation() {
             // 애니메이션 시작
             startPhysicsAnimation(physics, () => {
                 cellClone.remove();
-                animationCount++;
-                    
-                // 모든 애니메이션이 끝나면
-                if (animationCount !== totalCells) {
-                    return;
-                }
-                // 누적 합 테이블 업데이트
-                buildAllPrefixSums();
-                        
-                // 힌트 미리 계산
-                precomputeHints();
-                        
-                // 게임 종료 조건 확인
-                checkGameCompletion();
             });
         }, index * 50); // 각 셀마다 약간의 지연 시간
     });
+
+    // 누적 합 테이블 업데이트
+    buildAllPrefixSums();
+            
+    // 힌트 미리 계산
+    precomputeHints();
     
     // 선택 해제
     clearSelection();
@@ -761,9 +799,28 @@ function showHint() {
     // 힌트 계산 (캐시 활용)
     const hints = findHints();
     
-    // 힌트가 없으면 즉시 종료하고 새 타이머도 설정하지 않음
+    // 힌트가 없으면 게임 오버 처리
     if (hints.length === 0) {
         console.log("힌트를 찾을 수 없습니다. 더 이상 가능한 조합이 없습니다.");
+        
+        // 게임 상태 확인 - 모든 셀이 비어있는지 확인
+        let allCellsEmpty = true;
+        for (let i = 0; i < ROWS; i++) {
+            for (let j = 0; j < COLS; j++) {
+                if (grid[i][j] && grid[i][j].value > 0) {
+                    allCellsEmpty = false;
+                    break;
+                }
+            }
+            if (!allCellsEmpty) break;
+        }
+        
+        // 모든 셀이 비어있다면 게임 승리로 처리, 아니면 게임 오버로 처리
+        if (allCellsEmpty) {
+            endGame(true); // 승리
+        } else {
+            endGame(false, '가능한 조합이 없습니다.'); // 패배
+        }
         return;
     }
     
@@ -925,85 +982,30 @@ function updateTimer() {
 }
 
 // 게임 종료
-function endGame(isWin) {
+function endGame(isWin, message = '') {
     clearInterval(gameTimer);
     clearTimeout(hintTimer); // 힌트 타이머 정리
     
-    resultMessageElement.textContent = isWin ? '축하합니다! 모든 레이어를 파헤쳤습니다!' : '시간 초과! 게임 종료';
+    // 기본 타이틀은 '게임 종료!'로 유지
+    resultMessageElement.textContent = '게임 종료!';
     
+    // 종료 사유 설정
+    if (!message) {
+        if (isWin) {
+            gameEndReasonElement.textContent = '모든 레이어를 파헤쳤습니다!';
+        } else if (timeLeft <= 0) {
+            gameEndReasonElement.textContent = '시간 제한에 도달했습니다.';
+        } else {
+            gameEndReasonElement.textContent = '게임이 종료되었습니다.';
+        }
+    } else {
+        // 메시지가 제공된 경우 그대로 사용
+        gameEndReasonElement.textContent = message;
+    }
+    
+    // 점수 표시 및 게임 오버 화면 표시
     finalScoreElement.textContent = score;
     gameOverElement.style.display = 'flex';
-}
-
-// 레이어 게임 종료 조건 확인 - 모든 셀이 특정 레이어 이상이 되면 게임 승리
-function checkGameCompletion() {
-    const TARGET_LAYER = 5; // 목표 레이어 깊이 (조정 가능)
-    
-    // 최대 레이어 깊이가 목표 레이어에 도달했는지 확인
-    if (maxLayerDepth >= TARGET_LAYER) {
-        // 모든 셀이 최소한 TARGET_LAYER 레이어에 도달했는지 확인
-        let allCellsReachedTarget = true;
-        
-        for (let i = 0; i < ROWS; i++) {
-            for (let j = 0; j < COLS; j++) {
-                if (!grid[i][j] || grid[i][j].layerDepth < TARGET_LAYER) {
-                    allCellsReachedTarget = false;
-                    break;
-                }
-            }
-            if (!allCellsReachedTarget) break;
-        }
-        
-        if (allCellsReachedTarget) {
-            endGame(true);
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-// 이벤트 리스너
-restartBtn.addEventListener('click', initGame);
-
-// 로컬호스트 감지 함수
-function isLocalhost() {
-    // 파일 프로토콜 확인 (file://)
-    if (location.protocol === 'file:') {
-        return true;
-    }
-    
-    const hostname = location.hostname;
-    
-    // 로컬호스트 도메인 확인
-    if (hostname === 'localhost' || 
-        hostname === '' || 
-        hostname.endsWith('.localhost') || 
-        hostname.endsWith('.local')) {
-        return true;
-    }
-    
-    // IPv4 로컬호스트/내부망 확인
-    if (hostname === '127.0.0.1' || 
-        hostname.match(/^127\.(\d+)\.(\d+)\.(\d+)$/) !== null || 
-        hostname.startsWith('10.') || 
-        hostname.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\.(\d+)\.(\d+)$/) !== null || 
-        hostname.match(/^192\.168\.(\d+)\.(\d+)$/) !== null || 
-        hostname.match(/^169\.254\.(\d+)\.(\d+)$/) !== null) {
-        return true;
-    }
-    
-    // IPv6 로컬호스트 확인
-    if (hostname === '::1' || 
-        hostname === '[::1]' || 
-        hostname.toLowerCase().startsWith('fe80:') || // 링크 로컬 (fe80::/10)
-        hostname.toLowerCase().startsWith('fc00:') || // 유니크 로컬 fc00::/8 
-        hostname.toLowerCase().startsWith('fd00:') || // 유니크 로컬 fd00::/8
-        hostname.toLowerCase().match(/^f[cd][0-9a-f]{2}:/i) !== null) { // ULA fc00::/7 범위 전체
-        return true;
-    }
-    
-    return false;
 }
 
 // 힌트 미리 계산하기 - 상태 변경 후 즉시 실행하여 응답성 향상
@@ -1021,5 +1023,42 @@ function precomputeHints() {
     }, 0);
 }
 
-// 게임 시작
-initGame();
+let benfordProbabilities = null;
+
+// 벤포드 법칙에 따른 1~9 사이의 숫자 생성
+function generateBenfordNumber() {
+    // 벤포드 법칙 수식: P(d) = log10(1 + 1/d) 
+    // 여기서 d는 1부터 9까지의 첫 자리 숫자
+    if (benfordProbabilities === null) {
+        // 먼저 각 숫자의 확률을 계산하고 총 합을 구함
+        const probabilities = [];
+        let totalProbability = 0;
+        
+        for (let d = 1; d <= 9; d++) {
+            const probability = Math.log10(1 + 1/d);
+            probabilities.push(probability);
+            totalProbability += probability;
+        }
+        
+        // 확률 정규화 (총합이 1이 되도록)
+        for (let i = 0; i < probabilities.length; i++) {
+            probabilities[i] /= totalProbability;
+        }
+
+        benfordProbabilities = probabilities;
+    }
+    
+    // 숫자 선택
+    const rand = Math.random();
+    let cumulativeProbability = 0;
+    
+    for (let d = 1; d <= 9; d++) {
+        cumulativeProbability += benfordProbabilities[d-1];
+        if (rand < cumulativeProbability) {
+            return d;
+        }
+    }
+    
+    // 반올림 오차로 여기까지 오면 9 반환
+    return 1;
+}
