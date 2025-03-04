@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Make 10</title>
-    <link rel="stylesheet" href="numbergame.css">
+    <link rel="stylesheet" href="numbergame.min.css">
 </head>
 <body>
     <h1>Make 10</h1>
@@ -54,12 +54,20 @@
             <p id="game-end-reason" class="game-end-reason"></p>
             <p>최종 점수:</p>
             <div class="score-display" id="final-score">0</div>
-            <button class="restart-btn" id="restart-btn">새 게임 시작</button>
+            <div class="stage-clear-info" id="stage-clear-info" style="display: none;">
+                <p class="stage-clear-message">스테이지 클리어!</p>
+                <div class="stage-stars" id="stage-stars">★★★</div>
+            </div>
+            <div class="game-buttons">
+                <button class="restart-btn" id="restart-btn">재시작</button>
+                <button class="next-stage-btn" id="next-stage-btn" style="display: none;">다음 스테이지</button>
+                <button class="stage-select-btn" id="stage-select-btn">스테이지 선택</button>
+            </div>
         </div>
     </div>
     
     <div id="stage-number">Stage <span class="stage-number">1</span></div>
-    <script type="module" src="numbergame.js">
+    <script type="module" src="numbergame.min.js">
     </script>
 </body>
 

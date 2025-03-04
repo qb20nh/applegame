@@ -1,18 +1,106 @@
 import { pseudoPermutation } from './feistel.min.js';
 
+// 로컬 호스트 확인 함수 - 파일 최상단으로 이동
+function isLocalhost() {
+    // Get the hostname from the current URL.
+    const hostname = window.location.hostname;
+  
+    // If hostname is empty (e.g. when using file:// protocol), treat as local.
+    if (!hostname) return true;
+  
+    // 1. Standard hostname for localhost.
+    if (hostname === 'localhost') return true;
+  
+    // 2. IPv6 localhost addresses.
+    // Some browsers might return either "[::1]" or "::1".
+    if (hostname === '[::1]' || hostname === '::1') return true;
+  
+    // 3. IPv4 loopback addresses.
+    // According to IPv4 standards, any address in the 127.0.0.0/8 block is loopback.
+    // This regular expression strictly matches numbers between 0 and 255.
+    const ipv4LoopbackRegex = /^127(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d?\d)){3}$/;
+    if (ipv4LoopbackRegex.test(hostname)) return true;
+  
+    // 4. 'testapp' subdomain - for specific testing environments.
+    if (hostname.includes('testapp')) return true;
+  
+    return false;
+}
+
 const noop = () => {};
 const IS_LOCALHOST = isLocalhost();
+
+// 시드 기반 난수 생성 관련 변수 및 함수
+let currentSeed = 12345;
+let randomGenerator = null;
+
+// 시드를 기반으로 하는 난수 생성 클래스
+class SeededRandom {
+    constructor(seed) {
+        this.seed = seed;
+    }
+
+    // 0~1 사이의 난수 생성
+    next() {
+        const x = Math.sin(this.seed++) * 10000;
+        return x - Math.floor(x);
+    }
+
+    // min~max 사이의 정수 난수 생성
+    nextInt(min, max) {
+        return Math.floor(this.next() * (max - min + 1)) + min;
+    }
+
+    // 배열을 섞는 함수 (Fisher-Yates 알고리즘)
+    shuffle(array) {
+        const shuffled = [...array];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(this.next() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
+    }
+}
+
+// 시드 설정 함수
+function setSeed(seed) {
+    currentSeed = seed;
+    randomGenerator = new SeededRandom(seed);
+    console.log(`시드 설정: ${seed}`);
+}
+
+// 랜덤 생성기 가져오기
+function getRandom() {
+    if (!randomGenerator) {
+        setSeed(currentSeed);
+    }
+    return randomGenerator;
+}
+
+// 스테이지 번호를 기반으로 시드 생성
+function generateStageSeed(stageNumber) {
+    // 기본 시드에 스테이지 번호를 결합하여 고유한 시드 생성
+    return 1000000 + stageNumber * 1000 + 123;
+}
+
+// 현재 스테이지 번호 변수 추가 (기본값: 1)
+let currentStageNumber = 1;
+
+// 초기 시드 설정 - 스테이지 1 기준으로 설정
+setSeed(generateStageSeed(currentStageNumber));
+
 Object.entries(console).forEach(([name, value]) => {
-    if (typeof value === 'function') {
+    if (typeof value !== 'function') {
+        return;
+    }
         const wrappedFunction = new Proxy(value, {
             apply(target, thisArg, argumentsList) {
                 const fn = IS_LOCALHOST ? target : noop;
                 return Reflect.apply(fn, thisArg, argumentsList);
             }
         })
-        console[name+'_'] = value;
+    console[`${name}_`] = value;
         console[name] = wrappedFunction;
-    }
 })
 
 // 게임 변수 초기화
@@ -69,6 +157,10 @@ let resultMessageElement = document.getElementById('result-message');
 let gameEndReasonElement = document.getElementById('game-end-reason');
 let finalScoreElement = document.getElementById('final-score');
 let restartBtn = document.getElementById('restart-btn');
+let stageClearInfoElement = document.getElementById('stage-clear-info');
+let stageStarsElement = document.getElementById('stage-stars');
+let nextStageBtn = document.getElementById('next-stage-btn');
+let stageSelectBtn = document.getElementById('stage-select-btn');
 
 // 캐시된 DOM 요소들 - 성능 최적화를 위해 사용
 let cellElements = {}; // 셀 요소 캐시 저장소
@@ -84,7 +176,13 @@ function setGridCSS() {
 }
 
 // 게임 초기화
-function initGame() {
+function initGame(seed) {
+    // 시드 설정 - 항상 현재 스테이지 번호 기반으로 설정
+    if (seed === undefined) {
+        seed = generateStageSeed(currentStageNumber);
+    }
+    setSeed(seed);
+    
     // 그리드 CSS 설정
     setGridCSS();
     
@@ -98,7 +196,7 @@ function initGame() {
             const isRightHalf = aspect > 1 ? j >= COLS / 2 : i >= ROWS / 2; // 오른쪽 절반 여부 확인
             
             row.push({
-                value: Math.floor(generateBenfordNumber()), // 1부터 9까지 랜덤 숫자 생성
+                value: getRandom().nextInt(1, 9), // 시드 기반 난수 생성
                 layerDepth: isRightHalf ? 1 : 0, // 초기 레이어 깊이
                 color: isRightHalf ? COLORS[1] : COLORS[0] // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색
             });
@@ -159,10 +257,35 @@ function initDom() {
     resultMessageElement = document.getElementById('result-message');
     gameEndReasonElement = document.getElementById('game-end-reason');
     finalScoreElement = document.getElementById('final-score');
-    restartBtn = document.getElementById('restart-btn');
+    stageClearInfoElement = document.getElementById('stage-clear-info');
+    stageStarsElement = document.getElementById('stage-stars');
     
-    // 이벤트 리스너 설정
-    restartBtn.addEventListener('click', initGame);
+    // 버튼 요소
+    restartBtn = document.getElementById('restart-btn');
+    nextStageBtn = document.getElementById('next-stage-btn');
+    stageSelectBtn = document.getElementById('stage-select-btn');
+    
+    // 이벤트 리스너 설정 - 현재 스테이지 번호로 게임 재시작
+    restartBtn.addEventListener('click', () => {
+        // 현재 스테이지 시드로 게임 재시작
+        gameOverElement.style.display = 'none';
+        initGame(generateStageSeed(currentStageNumber));
+    });
+    
+    // 다음 스테이지 버튼 클릭 시
+    nextStageBtn.addEventListener('click', () => {
+        // 다음 스테이지로 이동
+        currentStageNumber++;
+        stageNumberElement.textContent = currentStageNumber;
+        gameOverElement.style.display = 'none';
+        initGame(generateStageSeed(currentStageNumber));
+    });
+    
+    // 스테이지 선택 버튼 클릭 시
+    stageSelectBtn.addEventListener('click', () => {
+        gameOverElement.style.display = 'none';
+        showStageSelection();
+    });
     
     // 그리드 이벤트 리스너 설정 - 포인터 이벤트만 사용
     gameGridElement.addEventListener('pointerdown', startSelection);
@@ -174,8 +297,23 @@ function initDom() {
 
 // 페이지 로드 완료 후 실행
 document.addEventListener('DOMContentLoaded', () => {
+    // DOM 요소 초기화
     initDom();
-    initGame();
+    
+    // 스테이지 선택 다이얼로그 표시 (게임을 바로 시작하지 않음)
+    if (stageDialog) {
+        // 스테이지 선택 화면 준비
+        if (stagesContainer.children.length === 0) {
+            initPagination();
+            generateStages();
+        }
+        // 스테이지 선택 다이얼로그 표시
+        stageDialog.showModal();
+    } else {
+        console.error('스테이지 선택 다이얼로그를 찾을 수 없습니다.');
+        // 오류 시 기본 스테이지(1)로 게임 시작
+        initGame(generateStageSeed(currentStageNumber));
+    }
 });
 
 // 그리드 렌더링
@@ -553,13 +691,12 @@ function revealNextLayerWithAnimation() {
         // 남은 힌트 수에 따라 1/sqrt(hintsCount) 확률로 벤포드 법칙 사용
         let newValue;
         
-        // 힌트가 적을수록 벤포드 법칙을 사용할 확률 증가
-        // hintsCount가 0이면 무조건 벤포드 법칙 사용 (게임 진행을 위해)
-        const useBenfordProbability = hintsCount <= 1 ? 1 : 1 / Math.sqrt(hintsCount);
+        // 벤포드 법칙 확률 계산 (힌트 수가 많을수록 낮아짐)
+        const useBenfordProbability = 1.0 / Math.sqrt(hintsCount);
         
-        if (Math.random() < useBenfordProbability) {
+        if (getRandom().next() < useBenfordProbability) {
             // 벤포드 법칙 사용
-            newValue = generateBenfordNumber();
+            newValue = getRandom().nextInt(1, 9);
             console.log(`벤포드 법칙 적용 (힌트 수: ${hintsCount}, 확률: ${(useBenfordProbability * 100).toFixed(2)}%) - 생성된 값: ${newValue}`);
         } else {
             // 기존 방식 사용
@@ -584,7 +721,6 @@ function revealNextLayerWithAnimation() {
             }
             // 실제 위치에 셀을 고정 (애니메이션용 복제본을 위해)
             const rect = cellElement.getBoundingClientRect();
-            const gridRect = gameGridElement.getBoundingClientRect();
                 
             // 클론 생성 (사라지는 애니메이션용)
             const cellClone = cellElement.cloneNode(true);
@@ -606,16 +742,16 @@ function revealNextLayerWithAnimation() {
                 
             // 물리 애니메이션 파라미터
             const physics = {
-                // 발사 각도: 45~135도 사이 (위쪽 방향)
-                angle: (45 + Math.random() * 90) * Math.PI / 180,
+                // 각도: 45~135도 사이 (위쪽 방향)
+                angle: (45 + getRandom().next() * 90) * Math.PI / 180,
                 // 초기 속도: 200~300 픽셀/초
-                initialSpeed: 200 + Math.random() * 100,
+                initialSpeed: 200 + getRandom().next() * 100,
                 // 회전 속도: -360~360도/초
-                rotationSpeed: -360 + Math.random() * 720,
+                rotationSpeed: -360 + getRandom().next() * 720,
                 // 중력 가속도: 980 픽셀/초^2 (물리학적 중력과 유사)
                 gravity: 980,
                 // 애니메이션 지속 시간: 0.8~1.2초
-                duration: 400 + Math.random() * 400,
+                duration: 400 + getRandom().next() * 400,
                 // 타임스탬프 초기화
                 startTime: null,
                 // 위치 및 회전 추적
@@ -915,14 +1051,10 @@ function showHint() {
 
 // 이전과 다른 랜덤 힌트 인덱스 가져오기
 function getRandomDifferentHintIndex(hintsLength) {
-    // 힌트가 없거나 하나뿐이면 그냥 0 반환
-    if (hintsLength <= 0) return -1;
-    if (hintsLength === 1) return 0;
-    
-    // 이전 힌트와 다른 새 인덱스 선택
     let newIndex;
+    
     do {
-        newIndex = Math.floor(Math.random() * hintsLength);
+        newIndex = Math.floor(getRandom().next() * hintsLength);
     } while (newIndex === lastShownHintIndex);
     
     return newIndex;
@@ -1069,7 +1201,7 @@ function endGame(isWin, message = '') {
     
     // 종료 사유 설정
     if (message) {
-        // 메시지가 제공된 경우 그대로 사용
+        // 메시지가 제공된 경우, 그대로 사용
         gameEndReasonElement.textContent = message;
     } else if (isWin) {
         gameEndReasonElement.textContent = '모든 레이어를 파헤쳤습니다!';
@@ -1081,6 +1213,26 @@ function endGame(isWin, message = '') {
     
     // 점수 표시 및 게임 오버 화면 표시
     finalScoreElement.textContent = score;
+    
+    // 스테이지 클리어 판정 (50점 이상)
+    const isStageCleared = score >= 50;
+    stageClearInfoElement.style.display = isStageCleared ? 'block' : 'none';
+    
+    if (isStageCleared) {
+        // 스테이지 클리어 시 별점 계산 및 표시
+        stageStarsElement.textContent = calculateStars(score);
+        
+        // 스테이지 클리어 데이터 저장
+        stageData.clearStage(currentStageNumber, score);
+        
+        // 다음 스테이지 버튼 표시
+        nextStageBtn.style.display = 'block';
+    } else {
+        // 클리어하지 못한 경우 다음 스테이지 버튼 숨김
+        nextStageBtn.style.display = 'none';
+    }
+    
+    // 게임 오버 화면 표시
     gameOverElement.style.display = 'flex';
 }
 
@@ -1099,70 +1251,6 @@ function precomputeHints() {
     }, 0);
 }
 
-let benfordProbabilities = null;
-
-// 벤포드 법칙에 따른 1~9 사이의 숫자 생성
-function generateBenfordNumber() {
-    // 벤포드 법칙 수식: P(d) = log10(1 + 1/d) 
-    // 여기서 d는 1부터 9까지의 첫 자리 숫자
-    if (benfordProbabilities === null) {
-        // 먼저 각 숫자의 확률을 계산하고 총 합을 구함
-        const probabilities = [];
-        let totalProbability = 0;
-        
-        for (let d = 1; d <= 9; d++) {
-            const probability = Math.log10(1 + 1/d);
-            probabilities.push(probability);
-            totalProbability += probability;
-        }
-        
-        // 확률 정규화 (총합이 1이 되도록)
-        for (let i = 0; i < probabilities.length; i++) {
-            probabilities[i] /= totalProbability;
-        }
-
-        benfordProbabilities = probabilities;
-    }
-    
-    // 숫자 선택
-    const rand = Math.random();
-    let cumulativeProbability = 0;
-    
-    for (let d = 1; d <= 9; d++) {
-        cumulativeProbability += benfordProbabilities[d-1];
-        if (rand < cumulativeProbability) {
-            return d;
-        }
-    }
-    
-    // 반올림 오차로 여기까지 오면 9 반환
-    return 1;
-}
-
-function isLocalhost() {
-    // Get the hostname from the current URL.
-    const hostname = window.location.hostname;
-  
-    // If hostname is empty (e.g. when using file:// protocol), treat as local.
-    if (!hostname) return true;
-  
-    // 1. Standard hostname for localhost.
-    if (hostname === 'localhost') return true;
-  
-    // 2. IPv6 localhost addresses.
-    // Some browsers might return either "[::1]" or "::1".
-    if (hostname === '[::1]' || hostname === '::1') return true;
-  
-    // 3. IPv4 loopback addresses.
-    // According to IPv4 standards, any address in the 127.0.0.0/8 block is loopback.
-    // This regular expression strictly matches numbers between 0 and 255.
-    const ipv4LoopbackRegex = /^127(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d?\d)){3}$/;
-    if (ipv4LoopbackRegex.test(hostname)) return true;
-  
-    // If none of the conditions are met, it's not considered localhost.
-    return false;
-  }
-  
 // 스테이지 선택 다이얼로그 관련 코드
 const stageDialog = document.getElementById('stage-selection-dialog');
 const closeStageButton = document.getElementById('close-stage-selection');
@@ -1196,7 +1284,7 @@ function initPagination() {
     pageNumbersContainer.innerHTML = '';
     for (let i = 1; i <= totalPages; i++) {
         const pageNumberBtn = document.createElement('div');
-        pageNumberBtn.className = 'page-number' + (i === currentPage ? ' active' : '');
+        pageNumberBtn.className = `page-number${i === currentPage ? ' active' : ''}`;
         pageNumberBtn.textContent = i;
         pageNumberBtn.addEventListener('click', () => {
             if (i !== currentPage) {
@@ -1248,39 +1336,87 @@ function updatePageControls() {
     });
 }
 
-// 닫기 버튼 클릭 시 다이얼로그 닫기
+// 닫기 버튼 클릭 시 다이얼로그 닫기 및 게임 시작
 closeStageButton.addEventListener('click', () => {
     stageDialog.close();
+    // 현재 선택된 스테이지로 게임 시작
+    initGame(generateStageSeed(currentStageNumber));
 });
 
-// 클릭 이벤트가 다이얼로그 바깥쪽에서 발생하면 닫기
+// 클릭 이벤트가 다이얼로그 바깥쪽에서 발생하면 닫기 및 게임 시작
 stageDialog.addEventListener('click', (e) => {
     if (e.target === stageDialog) {
         stageDialog.close();
+        // 현재 선택된 스테이지로 게임 시작
+        initGame(generateStageSeed(currentStageNumber));
     }
 });
 
-// 스테이지 데이터 (임시 데이터, 실제로는 로컬 스토리지나 서버에서 가져올 수 있음)
+// 스테이지 데이터 (로컬 스토리지에서 불러오거나 기본값 사용)
 const stageData = {
-    totalStages: 1000,                // 1000개 스테이지로 변경
-    completedStages: 15,              // 완료된 스테이지 수
-    stageScores: {},                  // 각 스테이지별 최고 점수
-    initializeScores() {              // 테스트용 점수 초기화 함수
+    totalStages: 1000,
+    completedStages: 0,
+    stageScores: {},
+    
+    // 로컬 스토리지에서 데이터 불러오기
+    loadFromStorage() {
+        const storedData = localStorage.getItem('stageData');
+        if (storedData) {
+            const parsedData = JSON.parse(storedData);
+            this.completedStages = parsedData.completedStages || 0;
+            this.stageScores = parsedData.stageScores || {};
+            console.log('로컬 스토리지에서 스테이지 데이터 불러옴:', this);
+            return;
+        }
+        console.log('로컬 스토리지에 저장된 데이터가 없음, 기본값 사용');
+    },
+    
+    // 로컬 스토리지에 데이터 저장
+    saveToStorage() {
+        const dataToSave = {
+            completedStages: this.completedStages,
+            stageScores: this.stageScores
+        };
+        localStorage.setItem('stageData', JSON.stringify(dataToSave));
+        console.log('스테이지 데이터 저장됨:', dataToSave);
+    },
+    
+    // 스테이지 클리어 처리
+    clearStage(stageNumber, score) {
+        // 기존 점수와 비교하여 최고 점수 저장
+        if (!this.stageScores[stageNumber] || score > this.stageScores[stageNumber]) {
+            this.stageScores[stageNumber] = score;
+        }
+        
+        // 완료한 스테이지 수 업데이트
+        if (stageNumber > this.completedStages) {
+            this.completedStages = stageNumber;
+        }
+        
+        // 변경사항 저장
+        this.saveToStorage();
+    },
+    
+    // 테스트용 점수 초기화 (실제 사용 시에는 제거)
+    initializeScores() {
         for (let i = 1; i <= this.completedStages; i++) {
             // 무작위 점수 생성 (400~1500)
-            this.stageScores[i] = Math.floor(Math.random() * 1100) + 400;
+            if (!this.stageScores[i]) {
+                this.stageScores[i] = Math.floor(getRandom().next() * 1100) + 400;
+            }
         }
     }
 };
 
-// 테스트용 점수 초기화
-stageData.initializeScores();
+// 데이터 불러오기
+stageData.loadFromStorage();
 
 // 별점 계산 함수 (0-3개 별)
 function calculateStars(score) {
-    if (score >= 1200) return '★★★';
-    if (score >= 800) return '★★☆';
-    return '★☆☆';
+    if (score >= 150) return '★★★';
+    if (score >= 100) return '★★☆';
+    if (score >= 50) return '★☆☆';
+    return '☆☆☆';
 }
 
 // 스테이지 타일 동적 생성 함수
@@ -1318,7 +1454,7 @@ function generateStages() {
         
         // 완료된 스테이지에만 클릭 이벤트 추가
         if (isUnlocked) {
-            stageItem.addEventListener('click', function() {
+            stageItem.addEventListener('click', () => {
                 selectStage(i);
             });
         }
@@ -1330,11 +1466,19 @@ function generateStages() {
 
 // 스테이지 선택 처리 함수
 function selectStage(stageNumber) {
+    // 현재 스테이지 번호 업데이트
+    currentStageNumber = stageNumber;
     stageNumberElement.textContent = stageNumber;
     console.log(`스테이지 ${stageNumber} 선택됨`);
+    
+    // 스테이지 번호에 맞는 시드 생성
+    const stageSeed = generateStageSeed(stageNumber);
+    
+    // 다이얼로그 닫기
     stageDialog.close();
-    // 선택한 스테이지로 게임 초기화 (구현 필요)
-    // initGame();
+    
+    // 선택한 스테이지로 게임 초기화 (시드 전달)
+    initGame(stageSeed);
 }
 
 function injectGlobal(func) {
