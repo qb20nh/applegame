@@ -287,12 +287,18 @@ function initDom() {
         showStageSelection();
     });
     
-    // 그리드 이벤트 리스너 설정 - 포인터 이벤트만 사용
+    // 그리드 이벤트 리스너 설정 - 포인터 이벤트와 터치 이벤트 모두 추가
     gameGridElement.addEventListener('pointerdown', startSelection);
     gameGridElement.addEventListener('pointermove', updateSelection);
     gameGridElement.addEventListener('pointerup', endSelection);
     gameGridElement.addEventListener('pointercancel', endSelection);
     gameGridElement.addEventListener('pointerleave', endSelection);
+    
+    // 모바일 터치 전용 이벤트 추가
+    gameGridElement.addEventListener('touchstart', handleTouchStart, { passive: false });
+    gameGridElement.addEventListener('touchmove', handleTouchMove, { passive: false });
+    gameGridElement.addEventListener('touchend', handleTouchEnd, { passive: false });
+    gameGridElement.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 }
 
 // 페이지 로드 완료 후 실행
@@ -370,30 +376,60 @@ function startSelection(e) {
     
     // 셀 좌표 계산
     const targetElement = e.target;
-    selectionStartCell = targetElement.classList.contains('cell') ? {
-        row: parseInt(targetElement.dataset.row, 10),
-        col: parseInt(targetElement.dataset.col, 10)
-    } : getCellCoordinatesFromPosition(e.clientX, e.clientY);
+    
+    // 터치 입력 또는 셀 요소가 아닌 경우 좌표 계산으로 찾기
+    if (e.pointerType === POINTER_TYPE_TOUCH || !targetElement.classList.contains('cell')) {
+        // 위치로부터 셀 좌표 계산
+        selectionStartCell = getCellCoordinatesFromPosition(e.clientX, e.clientY);
+        
+        // 셀 요소 직접 찾기 (특히 모바일 터치에서 중요)
+        const elementAtPoint = document.elementFromPoint(e.clientX, e.clientY);
+        if (elementAtPoint && elementAtPoint.classList.contains('cell')) {
+            selectionStartCell = {
+                row: parseInt(elementAtPoint.dataset.row, 10),
+                col: parseInt(elementAtPoint.dataset.col, 10)
+            };
+        }
+    } else {
+        // 일반적인 마우스 클릭 - 타겟 요소 사용
+        selectionStartCell = {
+            row: parseInt(targetElement.dataset.row, 10),
+            col: parseInt(targetElement.dataset.col, 10)
+        };
+    }
     
     clearSelection();
     selectCellsInRange(selectionStartCell, selectionStartCell);
 }
 
-// 마우스 위치로부터 셀 좌표 계산
+// 마우스/터치 위치로부터 셀 좌표 계산
 function getCellCoordinatesFromPosition(x, y) {
+    // 그리드 위치 및 크기 정보 가져오기
     const gridRect = gameGridElement.getBoundingClientRect();
     
-    // 그리드 내 상대 위치 계산
-    const relativeX = x - gridRect.left - GRID_PADDING; // 그리드 패딩 고려
+    // 그리드 내 상대 위치 계산 (패딩 고려)
+    const relativeX = x - gridRect.left - GRID_PADDING;
     const relativeY = y - gridRect.top - GRID_PADDING;
     
-    // 셀 좌표 계산
-    let col = Math.floor(relativeX / (CELL_SIZE + GRID_GAP)); // 그리드 갭 고려
-    let row = Math.floor(relativeY / (CELL_SIZE + GRID_GAP));
+    // 유효하지 않은 좌표는 가장 가까운 유효한 셀로 보정
+    let validRelativeX = Math.max(0, relativeX);
+    let validRelativeY = Math.max(0, relativeY);
+    
+    // 셀 크기와 간격을 고려하여 행과 열 계산
+    let col = Math.floor(validRelativeX / (CELL_SIZE + GRID_GAP));
+    let row = Math.floor(validRelativeY / (CELL_SIZE + GRID_GAP));
     
     // 유효한 범위로 제한
     col = Math.max(0, Math.min(col, COLS - 1));
     row = Math.max(0, Math.min(row, ROWS - 1));
+    
+    // 좌표가 유효한지 확인 (그리드 영역 밖이면 가장 가까운 셀 반환)
+    if (relativeX < 0 || relativeY < 0 || 
+        relativeX > (CELL_SIZE + GRID_GAP) * COLS || 
+        relativeY > (CELL_SIZE + GRID_GAP) * ROWS) {
+        // 로그로 유효하지 않은 좌표 기록 (디버깅용)
+        console.debug('유효하지 않은 좌표 보정:', { x, y, relativeX, relativeY, fixedRow: row, fixedCol: col });
+    }
     
     return { row, col };
 }
@@ -1483,4 +1519,78 @@ function selectStage(stageNumber) {
 
 function injectGlobal(func) {
     globalThis[func.name] = func;
+}
+
+// 터치 이벤트 핸들러 - 터치 이벤트를 포인터 이벤트로 변환
+function handleTouchStart(e) {
+    // 게임 영역 내에서만 스크롤 방지
+    const gridRect = gameGridElement.getBoundingClientRect();
+    if (e.touches.length > 0) {
+        const touch = e.touches[0];
+        // 게임 그리드 내부인 경우에만 스크롤 차단
+        if (
+            touch.clientX >= gridRect.left && 
+            touch.clientX <= gridRect.right && 
+            touch.clientY >= gridRect.top && 
+            touch.clientY <= gridRect.bottom
+        ) {
+            e.preventDefault();
+            
+            // 가상 포인터 이벤트 생성
+            const simulatedEvent = {
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+                target: document.elementFromPoint(touch.clientX, touch.clientY) || e.target,
+                pointerType: POINTER_TYPE_TOUCH,
+                pointerId: 1  // 임의의 포인터 ID
+            };
+            
+            startSelection(simulatedEvent);
+        }
+    }
+}
+
+function handleTouchMove(e) {
+    // 선택 중이고 게임 영역 내에서만 스크롤 방지
+    if (isSelecting && e.touches.length > 0) {
+        const touch = e.touches[0];
+        const gridRect = gameGridElement.getBoundingClientRect();
+        
+        // 게임 그리드 내부 또는 선택 중인 경우에만 스크롤 차단
+        if (
+            touch.clientX >= gridRect.left && 
+            touch.clientX <= gridRect.right && 
+            touch.clientY >= gridRect.top && 
+            touch.clientY <= gridRect.bottom
+        ) {
+            e.preventDefault();
+            
+            // 가상 포인터 이벤트 생성
+            const simulatedEvent = {
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+                target: document.elementFromPoint(touch.clientX, touch.clientY) || e.target,
+                pointerType: POINTER_TYPE_TOUCH,
+                pointerId: 1  // 임의의 포인터 ID
+            };
+            
+            updateSelection(simulatedEvent);
+        }
+    }
+}
+
+function handleTouchEnd(e) {
+    if (isSelecting) {
+        // 선택 중이었다면 스크롤 방지
+        e.preventDefault();
+        
+        // 가상 포인터 이벤트 생성
+        const simulatedEvent = {
+            pointerType: POINTER_TYPE_TOUCH,
+            target: e.target,
+            pointerId: 1  // 임의의 포인터 ID
+        };
+        
+        endSelection(simulatedEvent);
+    }
 }
