@@ -1058,24 +1058,9 @@ function showHint() {
     if (hints.length === 0) {
         console.log("힌트를 찾을 수 없습니다. 더 이상 가능한 조합이 없습니다.");
         
-        // 게임 상태 확인 - 모든 셀이 비어있는지 확인
-        let allCellsEmpty = true;
-        for (let i = 0; i < ROWS; i++) {
-            for (let j = 0; j < COLS; j++) {
-                if (grid[i][j] && grid[i][j].value > 0) {
-                    allCellsEmpty = false;
-                    break;
-                }
-            }
-            if (!allCellsEmpty) break;
-        }
         
-        // 모든 셀이 비어있다면 게임 승리로 처리, 아니면 게임 오버로 처리
-        if (allCellsEmpty) {
-            endGame(true); // 승리
-        } else {
-            endGame(false, '가능한 조합이 없습니다.'); // 패배
-        }
+        
+        endGame('가능한 조합이 없습니다.');
         return;
     }
     
@@ -1235,7 +1220,7 @@ function updateTimer() {
 }
 
 // 게임 종료
-function endGame(isWin, message = '') {
+function endGame(message = '') {
     clearInterval(gameTimer);
     clearTimeout(hintTimer); // 힌트 타이머 정리
     
@@ -1246,9 +1231,9 @@ function endGame(isWin, message = '') {
     if (message) {
         // 메시지가 제공된 경우, 그대로 사용
         gameEndReasonElement.textContent = message;
-    } else if (isWin) {
-        gameEndReasonElement.textContent = '모든 레이어를 파헤쳤습니다!';
-    } else if (timeLeft <= 0) {
+    } else if (currentStageNumber === stageData.totalStages) {
+        gameEndReasonElement.textContent = '축하합니다! 모든 스테이지를 클리어하셨습니다!';
+    } else if (timeLeft === 0) {
         gameEndReasonElement.textContent = '시간 제한에 도달했습니다.';
     } else {
         gameEndReasonElement.textContent = '게임이 종료되었습니다.';
@@ -1268,8 +1253,13 @@ function endGame(isWin, message = '') {
         // 스테이지 클리어 데이터 저장
         stageData.clearStage(currentStageNumber, score);
         
-        // 다음 스테이지 버튼 표시
-        nextStageBtn.style.display = 'block';
+        // 다음 스테이지 버튼 표시 (마지막 스테이지에서는 표시하지 않음)
+        if (currentStageNumber < stageData.totalStages) {
+            nextStageBtn.style.display = 'block';
+        } else {
+            // 마지막 스테이지인 경우 다음 스테이지 버튼 숨김
+            nextStageBtn.style.display = 'none';
+        }
     } else {
         // 클리어하지 못한 경우 다음 스테이지 버튼 숨김
         nextStageBtn.style.display = 'none';
