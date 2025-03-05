@@ -112,8 +112,8 @@ const TIME_LIMIT = 100;
 const CELL_SIZE = 36; // 셀 크기(픽셀)
 const GRID_GAP = 4;   // 그리드 셀 간격(픽셀)
 const GRID_PADDING = 4; // 그리드 패딩(픽셀)
-const HINT_DELAY = 5000; // 힌트가 표시되기까지의 시간(ms)
-const HINT_DURATION = 3000; // 힌트 표시 지속 시간(ms)
+let HINT_DELAY = 5000; // 힌트가 표시되기까지의 시간(ms)
+let HINT_DURATION = 3000; // 힌트 표시 지속 시간(ms)
 const POINTER_TYPE_TOUCH = 'touch'; // 포인터 타입: 터치
 
 let grid = [];
@@ -274,16 +274,23 @@ function initDom() {
     
     // 다음 스테이지 버튼 클릭 시
     nextStageBtn.addEventListener('click', () => {
-        // 다음 스테이지로 이동
+        // 다음 스테이지로 이동 (데이터 업데이트 포함)
         currentStageNumber++;
         stageNumberElement.textContent = currentStageNumber;
+        
+        // 게임 오버 화면 숨기기
         gameOverElement.style.display = 'none';
+        
+        // 새 스테이지로 게임 초기화
         initGame(generateStageSeed(currentStageNumber));
     });
     
     // 스테이지 선택 버튼 클릭 시
     stageSelectBtn.addEventListener('click', () => {
+        // 게임 오버 화면 숨기기
         gameOverElement.style.display = 'none';
+        
+        // 스테이지 선택 다이얼로그 표시
         showStageSelection();
     });
     
@@ -1305,11 +1312,22 @@ const stagesPerPage = 100;
 
 // 다이얼로그 표시 함수
 function showStageSelection() {
-    // 처음 열 때만 페이지 초기화
+    // 데이터 업데이트를 위해 항상 최신 데이터 로드
+    stageData.loadFromStorage();
+    
+    // 페이지가 이미 초기화되었는지 확인
     if (stagesContainer.children.length === 0) {
+        // 첫 로드 시 페이징 초기화
         initPagination();
-        generateStages();
     }
+    
+    // 스테이지 데이터를 항상 새로 생성하여 최신 정보 반영
+    generateStages();
+    
+    // 페이지 컨트롤 업데이트
+    updatePageControls();
+    
+    // 다이얼로그 표시
     stageDialog.showModal();
 }
 injectGlobal(showStageSelection);
@@ -1398,13 +1416,19 @@ const stageData = {
     loadFromStorage() {
         const storedData = localStorage.getItem('stageData');
         if (storedData) {
-            const parsedData = JSON.parse(storedData);
-            this.completedStages = parsedData.completedStages || 0;
-            this.stageScores = parsedData.stageScores || {};
-            console.log('로컬 스토리지에서 스테이지 데이터 불러옴:', this);
-            return;
+            try {
+                const parsedData = JSON.parse(storedData);
+                this.completedStages = parsedData.completedStages || 0;
+                this.stageScores = parsedData.stageScores || {};
+                console.log('로컬 스토리지에서 스테이지 데이터 불러옴:', this);
+                return true;
+            } catch (error) {
+                console.error('스테이지 데이터 파싱 오류:', error);
+                return false;
+            }
         }
         console.log('로컬 스토리지에 저장된 데이터가 없음, 기본값 사용');
+        return false;
     },
     
     // 로컬 스토리지에 데이터 저장
@@ -1413,8 +1437,14 @@ const stageData = {
             completedStages: this.completedStages,
             stageScores: this.stageScores
         };
-        localStorage.setItem('stageData', JSON.stringify(dataToSave));
-        console.log('스테이지 데이터 저장됨:', dataToSave);
+        try {
+            localStorage.setItem('stageData', JSON.stringify(dataToSave));
+            console.log('스테이지 데이터 저장됨:', dataToSave);
+            return true;
+        } catch (error) {
+            console.error('스테이지 데이터 저장 오류:', error);
+            return false;
+        }
     },
     
     // 스테이지 클리어 처리
@@ -1517,8 +1547,8 @@ function selectStage(stageNumber) {
     initGame(stageSeed);
 }
 
-function injectGlobal(func) {
-    globalThis[func.name] = func;
+function injectGlobal(func, name = func.name) {
+    globalThis[name] = func;
 }
 
 // 터치 이벤트 핸들러 - 터치 이벤트를 포인터 이벤트로 변환
@@ -1593,4 +1623,28 @@ function handleTouchEnd(e) {
         
         endSelection(simulatedEvent);
     }
+}
+
+const DBG = {
+    backup: {
+        HINT_DELAY,
+        HINT_DURATION
+    },
+    hint() {
+        this.backup.HINT_DELAY = HINT_DELAY;
+        this.backup.HINT_DURATION = HINT_DURATION;
+        HINT_DELAY = 0;
+        HINT_DURATION = 100000;
+    },
+    hint_reset() {
+        HINT_DELAY = this.backup.HINT_DELAY;
+        HINT_DURATION = this.backup.HINT_DURATION;
+    },
+    gameover() {
+        // immediately end game
+        endGame(false, '테스트용 게임 종료');
+    }
+};
+if (IS_LOCALHOST) {
+    injectGlobal(DBG, 'DBG');
 }
