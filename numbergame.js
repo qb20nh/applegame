@@ -296,16 +296,16 @@ function initDom() {
     
     // 그리드 이벤트 리스너 설정 - 포인터 이벤트와 터치 이벤트 모두 추가
     gameGridElement.addEventListener('pointerdown', startSelection);
-    gameGridElement.addEventListener('pointermove', updateSelection);
-    gameGridElement.addEventListener('pointerup', endSelection);
-    gameGridElement.addEventListener('pointercancel', endSelection);
-    gameGridElement.addEventListener('pointerleave', endSelection);
+    // 이벤트를 document에 등록하여 보드 밖에서도 이동 감지
+    document.addEventListener('pointermove', updateSelection);
+    document.addEventListener('pointerup', endSelection);
+    document.addEventListener('pointercancel', endSelection);
     
     // 모바일 터치 전용 이벤트 추가
     gameGridElement.addEventListener('touchstart', handleTouchStart, { passive: false });
-    gameGridElement.addEventListener('touchmove', handleTouchMove, { passive: false });
-    gameGridElement.addEventListener('touchend', handleTouchEnd, { passive: false });
-    gameGridElement.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false }); // document 레벨에서 이벤트 캡처
+    document.addEventListener('touchend', handleTouchEnd, { passive: false }); // document 레벨에서 이벤트 캡처
+    document.addEventListener('touchcancel', handleTouchEnd, { passive: false }); // document 레벨에서 이벤트 캡처
 }
 
 // 페이지 로드 완료 후 실행
@@ -448,13 +448,23 @@ function updateSelection(e) {
     // 셀 좌표 계산 (효율적인 방식)
     const currentCell = getCellCoordinatesFromPosition(e.clientX, e.clientY);
     
+    // 좌표가 유효한 범위 내에 있는지 확인하고, 범위를 벗어나면 가장 가까운 유효한 셀로 보정
+    const validRow = Math.max(0, Math.min(currentCell.row, ROWS - 1));
+    const validCol = Math.max(0, Math.min(currentCell.col, COLS - 1));
+    
+    // 보정된 좌표로 셀 업데이트
+    const validCell = {
+        row: validRow,
+        col: validCol
+    };
+    
     // 셀 위치가 변경된 경우만 업데이트 - 불필요한 DOM 업데이트 방지
     if (!selectionEndCell || 
-        currentCell.row !== selectionEndCell.row || 
-        currentCell.col !== selectionEndCell.col) {
+        validCell.row !== selectionEndCell.row || 
+        validCell.col !== selectionEndCell.col) {
         
-        selectionEndCell = currentCell;
-        selectCellsInRange(selectionStartCell, currentCell);
+        selectionEndCell = validCell;
+        selectCellsInRange(selectionStartCell, validCell);
     }
 }
 
@@ -1571,31 +1581,24 @@ function handleTouchStart(e) {
 }
 
 function handleTouchMove(e) {
-    // 선택 중이고 게임 영역 내에서만 스크롤 방지
+    // 선택 중일 때만 처리
     if (isSelecting && e.touches.length > 0) {
         const touch = e.touches[0];
-        const gridRect = gameGridElement.getBoundingClientRect();
         
-        // 게임 그리드 내부 또는 선택 중인 경우에만 스크롤 차단
-        if (
-            touch.clientX >= gridRect.left && 
-            touch.clientX <= gridRect.right && 
-            touch.clientY >= gridRect.top && 
-            touch.clientY <= gridRect.bottom
-        ) {
-            e.preventDefault();
-            
-            // 가상 포인터 이벤트 생성
-            const simulatedEvent = {
-                clientX: touch.clientX,
-                clientY: touch.clientY,
-                target: document.elementFromPoint(touch.clientX, touch.clientY) || e.target,
-                pointerType: POINTER_TYPE_TOUCH,
-                pointerId: 1  // 임의의 포인터 ID
-            };
-            
-            updateSelection(simulatedEvent);
-        }
+        // 스크롤 차단을 위한 조건 체크 (선택 중인 경우만)
+        e.preventDefault();
+        
+        // 가상 포인터 이벤트 생성
+        const simulatedEvent = {
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+            target: document.elementFromPoint(touch.clientX, touch.clientY) || e.target,
+            pointerType: POINTER_TYPE_TOUCH,
+            pointerId: 1  // 임의의 포인터 ID
+        };
+        
+        // 선택 업데이트 - 보드 밖이어도 계속 수행
+        updateSelection(simulatedEvent);
     }
 }
 
