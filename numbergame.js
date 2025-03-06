@@ -1,31 +1,9 @@
-import { pseudoPermutation } from './feistel.min.js';
+import { Timer, TimerState, TimerAction } from './timer.js';
+import { isLocalhost } from './util.js';
+import { SeededRandom, pseudoPermutation } from './random.js';
 
-// 로컬 호스트 확인 함수 - 파일 최상단으로 이동
-function isLocalhost() {
-    // Get the hostname from the current URL.
-    const hostname = window.location.hostname;
-  
-    // If hostname is empty (e.g. when using file:// protocol), treat as local.
-    if (!hostname) return true;
-  
-    // 1. Standard hostname for localhost.
-    if (hostname === 'localhost') return true;
-  
-    // 2. IPv6 localhost addresses.
-    // Some browsers might return either "[::1]" or "::1".
-    if (hostname === '[::1]' || hostname === '::1') return true;
-  
-    // 3. IPv4 loopback addresses.
-    // According to IPv4 standards, any address in the 127.0.0.0/8 block is loopback.
-    // This regular expression strictly matches numbers between 0 and 255.
-    const ipv4LoopbackRegex = /^127(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d?\d)){3}$/;
-    if (ipv4LoopbackRegex.test(hostname)) return true;
-  
-    // 4. 'testapp' subdomain - for specific testing environments.
-    if (hostname.includes('testapp')) return true;
-  
-    return false;
-}
+injectGlobal(TimerState, 'TimerState');
+injectGlobal(TimerAction, 'TimerAction');
 
 const noop = () => {};
 const IS_LOCALHOST = isLocalhost();
@@ -33,34 +11,6 @@ const IS_LOCALHOST = isLocalhost();
 // 시드 기반 난수 생성 관련 변수 및 함수
 let currentSeed = 12345;
 let randomGenerator = null;
-
-// 시드를 기반으로 하는 난수 생성 클래스
-class SeededRandom {
-    constructor(seed) {
-        this.seed = seed;
-    }
-
-    // 0~1 사이의 난수 생성
-    next() {
-        const x = Math.sin(this.seed++) * 10000;
-        return x - Math.floor(x);
-    }
-
-    // min~max 사이의 정수 난수 생성
-    nextInt(min, max) {
-        return Math.floor(this.next() * (max - min + 1)) + min;
-    }
-
-    // 배열을 섞는 함수 (Fisher-Yates 알고리즘)
-    shuffle(array) {
-        const shuffled = [...array];
-        for (let i = shuffled.length - 1; i > 0; i--) {
-            const j = Math.floor(this.next() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-        }
-        return shuffled;
-    }
-}
 
 // 시드 설정 함수
 function setSeed(seed) {
@@ -104,9 +54,9 @@ Object.entries(console).forEach(([name, value]) => {
 })
 
 // 게임 변수 초기화
-const aspect = screen.availWidth / screen.availHeight;
-const ROWS = aspect > 1 ? 5 : 10;
-const COLS = aspect > 1 ? 10 : 5;
+let aspect = screen.availWidth / screen.availHeight;
+const ROWS = 5;
+const COLS = 10;
 const TARGET_SUM = 10;
 const TIME_LIMIT = 100;
 const CELL_SIZE = 36; // 셀 크기(픽셀)
@@ -120,14 +70,42 @@ let grid = [];
 let selectedCells = [];
 let score = 0;
 let timeLeft = TIME_LIMIT;
-let gameTimer;
+let timerUIUpdateInterval;
+let gameTimer = new Timer(() => {
+    clearInterval(timerUIUpdateInterval);
+    endGame('시간 초과!');
+}, TIME_LIMIT * 1000);
+injectGlobal(gameTimer, 'gameTimer');
+gameTimer.onStart(() => {
+    console.log('gameTimer onStart');
+    timerUIUpdateInterval = setInterval(updateTimerUI, 100);
+})
+gameTimer.onResume(() => {
+    console.log('gameTimer onResume');
+    timerUIUpdateInterval = setInterval(updateTimerUI, 100);
+})
+gameTimer.onPause(() => {
+    console.log('gameTimer onPause');
+    clearInterval(timerUIUpdateInterval);
+})
+gameTimer.onReset(() => {
+    console.log('gameTimer onReset');
+    clearInterval(timerUIUpdateInterval);
+})
+
 let isSelecting = false;
 let selectionStartCell = null;
 let selectionEndCell = null;  // 선택 종료 셀 추가
 let emptyCellCount = 0;
+let currentSelection = [];
+let selectedSum = 0;
 let currentSelectionSize = null;
 let lastClearTime = 0; // 마지막으로 셀을 클리어한 시간
-let hintTimer = null; // 힌트 타이머
+let hintWaitTimer = new Timer(showHint, HINT_DELAY); // 힌트 대기 타이머
+let hintDisplayTimer = new Timer(findHints, HINT_DURATION); // 힌트 표시 타이머
+hintWaitTimer.then(hintDisplayTimer);
+hintDisplayTimer.then(hintWaitTimer);
+
 let currentHint = null; // 현재 표시 중인 힌트
 let isHintVisible = false; // 힌트 표시 상태
 let lastVisibleHint = null; // 가장 최근에 표시된 힌트 저장
@@ -177,23 +155,66 @@ function setGridCSS() {
 
 // 게임 초기화
 function initGame(seed) {
-    // 시드 설정 - 항상 현재 스테이지 번호 기반으로 설정
-    if (seed === undefined) {
-        seed = generateStageSeed(currentStageNumber);
+    // 그리드와 게임 상태 초기화
+    grid = [];
+    currentSelection = [];
+    selectedSum = 0;
+    lastShownHintIndex = -1;
+    currentHint = null;
+    lastVisibleHint = null;
+    secondLastVisibleHint = null;
+    isHintVisible = false;
+    gameStateChanged = true;
+    timeLeft = TIME_LIMIT; // 게임 시간 초기화
+    isPaused = false;
+    
+    // 게임 타이머 초기화 (Timer 클래스 사용)
+    gameTimer.reset();
+    
+    // 힌트 타이머 초기
+    hintWaitTimer.reset();
+    hintDisplayTimer.reset();
+    
+    // DOM 요소 초기화
+    document.getElementById('game-over').style.display = 'none';
+    document.getElementById('sum').textContent = '0';
+    document.getElementById('time').textContent = (timeLeft).toFixed(1);
+    document.getElementById('time').classList.remove('time-warning');
+    
+    // 게임 그리드에서 일시정지 효과 제거
+    if (gameGridElement) {
+        gameGridElement.classList.remove('paused');
     }
+    
+    
+    // 랜덤 시드 설정
     setSeed(seed);
     
-    // 그리드 CSS 설정
+    // 그리드 생성 및 초기화
+    initGrid();
+
     setGridCSS();
     
-    // 그리드 초기화
+    // 그리드 렌더링
+    renderGrid();
+    
+    // 타이머 시작
+    gameTimer.start();
+    // 힌트 대기 타이머 시작
+    hintWaitTimer.start();
+    
+    // 최초 힌트 캐시 계산
+    precomputeHints();
+}
+
+function initGrid() {
     grid = [];
     for (let i = 0; i < ROWS; i++) {
         const row = [];
         for (let j = 0; j < COLS; j++) {
             // 각 셀에 값, 레이어 깊이, 색상 정보 추가
             // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색으로 시작
-            const isRightHalf = aspect > 1 ? j >= COLS / 2 : i >= ROWS / 2; // 오른쪽 절반 여부 확인
+            const isRightHalf = j >= COLS / 2; // 오른쪽 절반 여부 확인
             
             row.push({
                 value: getRandom().nextInt(1, 9), // 시드 기반 난수 생성
@@ -203,43 +224,6 @@ function initGame(seed) {
         }
         grid.push(row);
     }
-    
-    // 그리드 렌더링
-    renderGrid();
-    
-    // 게임 변수 초기화
-    selectedCells = [];
-    score = 0;
-    timeLeft = TIME_LIMIT;
-    emptyCellCount = 0;
-    selectionStartCell = null;
-    selectionEndCell = null;  // 선택 종료 셀 초기화
-    
-    // 힌트 관련 변수 초기화
-    clearTimeout(hintTimer);
-    hintTimer = setTimeout(showHint, HINT_DELAY);
-    isHintVisible = false;
-    cachedHints = null; // 힌트 캐시 초기화
-    gameStateChanged = true; // 게임 상태 변경됨을 명시적으로 설정
-    lastShownHintIndex = -1; // 힌트 인덱스도 초기화
-    lastVisibleHint = null; // 이전 힌트 초기화
-    secondLastVisibleHint = null; // 두 번째 이전 힌트 초기화
-    
-    // 누적 합 테이블 초기화
-    buildAllPrefixSums();
-    
-    // UI 업데이트
-    updateUI();
-    
-    // 타이머 시작
-    clearInterval(gameTimer);
-    gameTimer = setInterval(updateTimer, 100);
-    
-    // 게임 오버 화면 숨기기
-    gameOverElement.style.display = 'none';
-    
-    // 힌트 미리 계산하기 - 상태 변경 후 즉시 실행하여 응답성 향상
-    precomputeHints();
 }
 
 // DOM 초기화 및 게임 오버 화면 생성
@@ -264,6 +248,83 @@ function initDom() {
     restartBtn = document.getElementById('restart-btn');
     nextStageBtn = document.getElementById('next-stage-btn');
     stageSelectBtn = document.getElementById('stage-select-btn');
+    
+    // 일시 정지 관련 요소
+    pauseBtn = document.getElementById('pause-btn');
+    pauseMenuDialog = document.getElementById('pause-menu-dialog');
+    confirmationDialog = document.getElementById('confirmation-dialog');
+    
+    // 화면 방향 변경 감지 리스너 (resize 이벤트 사용)
+    window.addEventListener('resize', () => {
+        // 이전 방향 저장
+        const prevAspect = aspect;
+        const wasVertical = prevAspect < 1;
+        
+        // 현재 화면 비율 계산
+        aspect = window.innerWidth / window.innerHeight;
+        const isVertical = aspect < 1;
+        
+        // 화면 방향이 변경된 경우에만 그리드 다시 렌더링
+        if (wasVertical !== isVertical) {
+            console.log('화면 방향 변경 감지: ' + (isVertical ? '세로' : '가로') + ' 모드로 전환');
+            // 그리드 다시 렌더링
+            renderGrid();
+        }
+    });
+    
+    // 일시 정지 버튼 클릭 이벤트
+    pauseBtn.addEventListener('click', () => {
+        // 게임 일시 정지 및 메뉴 표시
+        pauseGame();
+        pauseMenuDialog.showModal();
+    });
+    
+    // 일시 정지 메뉴 버튼 이벤트 설정
+    document.getElementById('continue-btn').addEventListener('click', () => {
+        // 게임 계속하기
+        pauseMenuDialog.close();
+        resumeGame();
+    });
+    
+    document.getElementById('restart-from-pause-btn').addEventListener('click', () => {
+        // 다시 시작하기 확인
+        pauseMenuDialog.close();
+        pendingAction = 'restart';
+        showConfirmation('다시 시작하기', '현재 진행 중인 게임을 초기화하고 처음부터 다시 시작하시겠습니까?');
+    });
+    
+    document.getElementById('give-up-btn').addEventListener('click', () => {
+        // 포기하기 확인
+        pauseMenuDialog.close();
+        pendingAction = 'giveup';
+        showConfirmation('포기하기', '현재 진행 중인 게임을 포기하고 스테이지 선택 화면으로 돌아가시겠습니까?');
+    });
+    
+    // 확인 다이얼로그 버튼 이벤트 설정
+    document.getElementById('confirm-yes-btn').addEventListener('click', () => {
+        confirmationDialog.close();
+        
+        if (pendingAction === 'restart') {
+            // 현재 스테이지 재시작
+            isPaused = false;
+            initGame(generateStageSeed(currentStageNumber));
+        } else if (pendingAction === 'giveup') {
+            // 스테이지 선택 화면으로 돌아가기
+            isPaused = false;
+            if (stageDialog) {
+                stageDialog.showModal();
+            }
+        }
+        
+        pendingAction = null;
+    });
+    
+    document.getElementById('confirm-no-btn').addEventListener('click', () => {
+        confirmationDialog.close();
+        // 일시 정지 메뉴로 돌아가기
+        pauseMenuDialog.showModal();
+        pendingAction = null;
+    });
     
     // 이벤트 리스너 설정 - 현재 스테이지 번호로 게임 재시작
     restartBtn.addEventListener('click', () => {
@@ -336,16 +397,34 @@ function renderGrid() {
     // DOM 요소 캐시 초기화
     cellElements = {};
     
-    for (let i = 0; i < ROWS; i++) {
-        for (let j = 0; j < COLS; j++) {
-            const cell = grid[i][j];
+    // 화면이 세로 모드인지 확인 (aspect < 1일 경우 세로 모드)
+    const isVertical = aspect < 1;
+    
+    // 세로 모드일 때 행/열 교체하여 렌더링
+    const displayRows = isVertical ? COLS : ROWS;
+    const displayCols = isVertical ? ROWS : COLS;
+    
+    // 그리드 컨테이너 스타일 설정
+    gameGridElement.style.gridTemplateRows = `repeat(${displayRows}, ${CELL_SIZE}px)`;
+    gameGridElement.style.gridTemplateColumns = `repeat(${displayCols}, ${CELL_SIZE}px)`;
+    
+    // 세로 또는 가로 모드에 따라 그리드 렌더링
+    for (let i = 0; i < displayRows; i++) {
+        for (let j = 0; j < displayCols; j++) {
+            // 원본 그리드 좌표 계산
+            const originalRow = isVertical ? (ROWS - 1 - j) : i; // -90도 회전을 위해 행 인덱스 반전
+            const originalCol = isVertical ? i : j; // -90도 회전 좌표 변환
+            
+            const cell = grid[originalRow][originalCol];
             const cellElement = document.createElement('div');
             cellElement.className = 'cell';
-            cellElement.dataset.row = i;
-            cellElement.dataset.col = j;
+            
+            // 원본 좌표 저장 (이벤트 핸들링 등에 사용)
+            cellElement.dataset.row = originalRow;
+            cellElement.dataset.col = originalCol;
             
             // 셀 요소 캐싱 (성능 최적화)
-            const cellId = `${i}-${j}`;
+            const cellId = `${originalRow}-${originalCol}`;
             cellElements[cellId] = cellElement;
             
             if (cell && cell.value > 0) {
@@ -368,7 +447,7 @@ function renderGrid() {
 
 // 선택 시작
 function startSelection(e) {
-    if (timeLeft <= 0) return;
+    if (isPaused || timeLeft <= 0) return; // 일시 정지 상태이거나 게임이 종료된 경우 무시
     
     isSelecting = true;
     
@@ -400,8 +479,8 @@ function startSelection(e) {
     } else {
         // 일반적인 마우스 클릭 - 타겟 요소 사용
         selectionStartCell = {
-            row: parseInt(targetElement.dataset.row, 10),
-            col: parseInt(targetElement.dataset.col, 10)
+        row: parseInt(targetElement.dataset.row, 10),
+        col: parseInt(targetElement.dataset.col, 10)
         };
     }
     
@@ -414,6 +493,13 @@ function getCellCoordinatesFromPosition(x, y) {
     // 그리드 위치 및 크기 정보 가져오기
     const gridRect = gameGridElement.getBoundingClientRect();
     
+    // 화면이 세로 모드인지 확인 (aspect < 1일 경우 세로 모드)
+    const isVertical = aspect < 1;
+    
+    // 현재 표시되는 행/열 수
+    const displayRows = isVertical ? COLS : ROWS;
+    const displayCols = isVertical ? ROWS : COLS;
+    
     // 그리드 내 상대 위치 계산 (패딩 고려)
     const relativeX = x - gridRect.left - GRID_PADDING;
     const relativeY = y - gridRect.top - GRID_PADDING;
@@ -422,20 +508,33 @@ function getCellCoordinatesFromPosition(x, y) {
     let validRelativeX = Math.max(0, relativeX);
     let validRelativeY = Math.max(0, relativeY);
     
+    // 세로 모드와 가로 모드에 따라 셀 좌표 계산
     // 셀 크기와 간격을 고려하여 행과 열 계산
-    let col = Math.floor(validRelativeX / (CELL_SIZE + GRID_GAP));
-    let row = Math.floor(validRelativeY / (CELL_SIZE + GRID_GAP));
+    let displayCol = Math.floor(validRelativeX / (CELL_SIZE + GRID_GAP));
+    let displayRow = Math.floor(validRelativeY / (CELL_SIZE + GRID_GAP));
     
     // 유효한 범위로 제한
-    col = Math.max(0, Math.min(col, COLS - 1));
-    row = Math.max(0, Math.min(row, ROWS - 1));
+    displayCol = Math.max(0, Math.min(displayCol, displayCols - 1));
+    displayRow = Math.max(0, Math.min(displayRow, displayRows - 1));
+    
+    // 화면 방향에 따라 원본 그리드 좌표 계산
+    let row, col;
+    if (isVertical) {
+        // 세로 모드: -90도 회전된 좌표 변환 (시계 반대 방향)
+        row = ROWS - 1 - displayCol; // 행 인덱스 반전
+        col = displayRow;
+    } else {
+        // 가로 모드: 원래 좌표 그대로 사용
+        row = displayRow;
+        col = displayCol;
+    }
     
     // 좌표가 유효한지 확인 (그리드 영역 밖이면 가장 가까운 셀 반환)
     if (relativeX < 0 || relativeY < 0 || 
-        relativeX > (CELL_SIZE + GRID_GAP) * COLS || 
-        relativeY > (CELL_SIZE + GRID_GAP) * ROWS) {
+        relativeX > (CELL_SIZE + GRID_GAP) * displayCols || 
+        relativeY > (CELL_SIZE + GRID_GAP) * displayRows) {
         // 로그로 유효하지 않은 좌표 기록 (디버깅용)
-        console.debug('유효하지 않은 좌표 보정:', { x, y, relativeX, relativeY, fixedRow: row, fixedCol: col });
+        console.debug('유효하지 않은 좌표 보정:', { x, y, relativeX, relativeY, fixedRow: row, fixedCol: col, isVertical });
     }
     
     return { row, col };
@@ -443,7 +542,7 @@ function getCellCoordinatesFromPosition(x, y) {
 
 // 포인터 이동에 따른 선택 영역 업데이트 (pointermove 이벤트 핸들러)
 function updateSelection(e) {
-    if (!isSelecting || timeLeft <= 0) return;
+    if (isPaused || !isSelecting || timeLeft <= 0) return; // 일시 정지 상태이거나 선택 중이 아닌 경우 무시
     
     // 셀 좌표 계산 (효율적인 방식)
     const currentCell = getCellCoordinatesFromPosition(e.clientX, e.clientY);
@@ -470,7 +569,7 @@ function updateSelection(e) {
 
 // 선택 종료
 function endSelection(e) {
-    if (!isSelecting || timeLeft <= 0) return;
+    if (isPaused || !isSelecting || timeLeft <= 0) return; // 일시 정지 상태이거나 선택 중이 아닌 경우 무시
     
     isSelecting = false;
     
@@ -558,7 +657,6 @@ function endSelection(e) {
         revealNextLayerWithAnimation();
         
         score += pointsEarned;
-        console.log(`${pointsEarned} 점수 획득! ${pointsEarned}초 추가되었습니다.`);
         
         updateUI();
         
@@ -569,10 +667,6 @@ function endSelection(e) {
         if (isHintVisible) {
             hideHint(false); // 타이머 재설정하지 않음
         }
-        
-        // 힌트 타이머 재설정 (기존 타이머 제거 후 한 번만 설정)
-        clearTimeout(hintTimer);
-        hintTimer = setTimeout(showHint, HINT_DELAY);
         return;
         
         // 게임 종료 조건은 나중에 추가할 수 있음 (예: 모든 셀이 특정 레이어에 도달)
@@ -1042,14 +1136,10 @@ function findHints() {
 
 // 힌트 표시
 function showHint() {
-    // 게임 종료 상태면 힌트 표시 안 함
-    if (timeLeft <= 0) {
+    // 게임 종료 상태이거나 일시 정지 상태면 힌트 표시 안 함
+    if (timeLeft <= 0 || isPaused) {
         return;
     }
-    
-    // 타이머 초기화 (중요: 자기 자신을 다시 호출하는 타이머가 중첩되지 않도록)
-    clearTimeout(hintTimer);
-    hintTimer = null;
     
     // 이미 힌트가 표시 중이면 제거
     if (isHintVisible) {
@@ -1067,9 +1157,6 @@ function showHint() {
     // 힌트가 없으면 게임 오버 처리
     if (hints.length === 0) {
         console.log("힌트를 찾을 수 없습니다. 더 이상 가능한 조합이 없습니다.");
-        
-        
-        
         endGame('가능한 조합이 없습니다.');
         return;
     }
@@ -1081,10 +1168,6 @@ function showHint() {
     currentHint = hints[randomIndex];
     lastShownHintIndex = randomIndex; // 현재 표시된 힌트 인덱스 저장
     showCurrentHint();
-    
-    // 일정 시간 후 힌트 제거
-    clearTimeout(hintTimer); // 기존 타이머 제거 (중요)
-    hintTimer = setTimeout(() => hideHint(true), HINT_DURATION);
 }
 
 // 이전과 다른 랜덤 힌트 인덱스 가져오기
@@ -1102,6 +1185,11 @@ function getRandomDifferentHintIndex(hintsLength) {
 function showCurrentHint() {
     if (!currentHint) return;
     
+    // 일시 정지 상태면 힌트 표시만 하고 타이머는 시작하지 않음
+    if (isPaused) {
+        return;
+    }
+    
     // 추가 유효성 검사 - 힌트를 표시하기 전에 모든 셀이 유효한지 확인
     const allValid = currentHint.every(cell => 
         cell.row >= 0 && cell.row < ROWS && 
@@ -1110,10 +1198,6 @@ function showCurrentHint() {
     );
     
     if (!allValid) {
-        console.log("힌트 셀 중 일부가 현재 그리드에 유효하지 않음");
-        // 유효하지 않은 힌트는 표시하지 않고 다른 힌트 요청
-        clearTimeout(hintTimer);
-        hintTimer = setTimeout(showHint, 100); // 즉시 새 힌트 탐색
         return;
     }
     
@@ -1128,15 +1212,11 @@ function showCurrentHint() {
         if (cellElement && !cellElement.classList.contains('empty')) {
             cellElement.classList.add('hint');
         } else {
-            console.log(`Invalid hint cell at ${cell.row},${cell.col}`);
+            console.log(`유효하지 않은 힌트 셀: ${cell.row},${cell.col}`);
         }
     });
     
     isHintVisible = true;
-    
-    // 일정 시간 후 힌트 제거
-    clearTimeout(hintTimer); // 기존 타이머 제거 (중요)
-    hintTimer = setTimeout(() => hideHint(true), HINT_DURATION);
 }
 
 // 힌트 제거
@@ -1154,29 +1234,48 @@ function hideHint(resetTimer = true) {
         cell.classList.remove('hint');
     });
     
+    // 힌트 표시 타이머 정리
+    if (hintDisplayTimer) {
+        hintDisplayTimer.clear();
+        hintDisplayTimer = null;
+    }
+    
     // 상태 초기화
     currentHint = null;
     isHintVisible = false;
-    
-    // 타이머 재설정 (필요한 경우에만)
-    if (resetTimer) {
-        clearTimeout(hintTimer);
-        hintTimer = setTimeout(showHint, HINT_DELAY);
-    }
 }
 
 // 물리 기반 애니메이션 시작
 function startPhysicsAnimation(physics, onComplete) {
+    // 일시 정지 상태에서는 애니메이션을 시작하지 않음
+    if (isPaused) {
+        onComplete();
+        return;
+    }
+    
     // 애니메이션 시작 시간 기록
     physics.startTime = performance.now();
     
+    // 애니메이션 ID를 저장할 변수
+    let animationId = null;
+    
     // 애니메이션 함수
     function animate(timestamp) {
+        // 일시 정지 상태라면 애니메이션 중지
+        if (isPaused) {
+            return;
+        }
+        
         // 경과 시간 계산 (초 단위)
         const elapsed = (timestamp - physics.startTime) / 1000;
         
         // 애니메이션 지속 시간을 초과하면 종료
         if (elapsed >= physics.duration / 1000) {
+            // 애니메이션 목록에서 제거
+            const index = activeAnimations.indexOf(animationId);
+            if (index !== -1) {
+                activeAnimations.splice(index, 1);
+            }
             onComplete();
             return;
         }
@@ -1201,11 +1300,14 @@ function startPhysicsAnimation(physics, onComplete) {
         physics.element.style.opacity = physics.opacity;
         
         // 다음 프레임 요청
-        requestAnimationFrame(animate);
+        animationId = requestAnimationFrame(animate);
     }
     
     // 애니메이션 시작
-    requestAnimationFrame(animate);
+    animationId = requestAnimationFrame(animate);
+    
+    // 활성 애니메이션 목록에 추가
+    activeAnimations.push(animationId);
 }
 
 
@@ -1216,67 +1318,59 @@ function updateUI() {
     timeElement.textContent = timeLeft.toFixed(1);
 }
 
-// 타이머 업데이트
-function updateTimer() {
-    timeLeft -= 0.1;
+// 타이머 UI 업데이트 함수
+function updateTimerUI() {
+    if (isPaused) return;
     
-    if (timeLeft <= 0) {
-        timeLeft = 0;
-        clearInterval(gameTimer);
-        endGame(false);
+    // 남은 시간 계산 (시간이 지남에 따라 감소)
+    timeLeft = Math.max(0, gameTimer.getTimeRemaining() / 1000);
+    
+    // 타이머 표시 업데이트
+    timeElement.textContent = timeLeft.toFixed(1);
+    
+    // 시간이 10초 이하면 경고 효과 적용
+    if (timeLeft <= 10) {
+        timeElement.classList.add('time-warning');
     }
-
-    updateUI();
 }
 
 // 게임 종료
 function endGame(message = '') {
-    clearInterval(gameTimer);
-    clearTimeout(hintTimer); // 힌트 타이머 정리
+    if (isGameOver) return; // 이미 게임 오버 상태면 무시
     
-    // 기본 타이틀은 '게임 종료!'로 유지
-    resultMessageElement.textContent = '게임 종료!';
+    isGameOver = true;
     
-    // 종료 사유 설정
-    if (message) {
-        // 메시지가 제공된 경우, 그대로 사용
-        gameEndReasonElement.textContent = message;
-    } else if (currentStageNumber === stageData.totalStages) {
-        gameEndReasonElement.textContent = '축하합니다! 모든 스테이지를 클리어하셨습니다!';
-    } else if (timeLeft === 0) {
-        gameEndReasonElement.textContent = '시간 제한에 도달했습니다.';
-    } else {
-        gameEndReasonElement.textContent = '게임이 종료되었습니다.';
-    }
+    // 타이머 정리
+    gameTimer.reset();
+    hintWaitTimer.reset();
+    hintDisplayTimer.reset();
     
-    // 점수 표시 및 게임 오버 화면 표시
-    finalScoreElement.textContent = score;
+    // 힌트 숨기기 (화면에서만 제거)
+    document.querySelectorAll('.cell.hint').forEach(cell => {
+        cell.classList.remove('hint');
+    });
     
-    // 스테이지 클리어 판정 (50점 이상)
-    const isStageCleared = score >= 50;
-    stageClearInfoElement.style.display = isStageCleared ? 'block' : 'none';
+    // 선택 영역 초기화
+    clearSelection();
     
-    if (isStageCleared) {
-        // 스테이지 클리어 시 별점 계산 및 표시
-        stageStarsElement.textContent = calculateStars(score);
-        
-        // 스테이지 클리어 데이터 저장
-        stageData.clearStage(currentStageNumber, score);
-        
-        // 다음 스테이지 버튼 표시 (마지막 스테이지에서는 표시하지 않음)
-        if (currentStageNumber < stageData.totalStages) {
-            nextStageBtn.style.display = 'block';
-        } else {
-            // 마지막 스테이지인 경우 다음 스테이지 버튼 숨김
-            nextStageBtn.style.display = 'none';
+    // 진행 중인 애니메이션 중지
+    activeAnimations.forEach(id => {
+        cancelAnimationFrame(id);
+    });
+    activeAnimations = [];
+    
+    // 게임 오버 메시지 설정 및 표시
+    const gameOverElement = document.getElementById('game-over');
+    if (gameOverElement) {
+        const messageElement = document.getElementById('game-over-message');
+        if (messageElement) {
+            messageElement.textContent = message || '게임 종료!';
         }
-    } else {
-        // 클리어하지 못한 경우 다음 스테이지 버튼 숨김
-        nextStageBtn.style.display = 'none';
+        gameOverElement.style.display = 'flex';
     }
     
-    // 게임 오버 화면 표시
-    gameOverElement.style.display = 'flex';
+    // 이벤트 리스너 제거
+    removeGameEventListeners();
 }
 
 // 힌트 미리 계산하기 - 상태 변경 후 즉시 실행하여 응답성 향상
@@ -1424,8 +1518,8 @@ const stageData = {
                 return true;
             } catch (error) {
                 console.error('스테이지 데이터 파싱 오류:', error);
-                return false;
-            }
+    return false;
+  }
         }
         console.log('로컬 스토리지에 저장된 데이터가 없음, 기본값 사용');
         return false;
@@ -1635,9 +1729,79 @@ const DBG = {
     },
     gameover() {
         // immediately end game
-        endGame(false, '테스트용 게임 종료');
+        endGame('테스트용 게임 종료');
     }
 };
 if (IS_LOCALHOST) {
     injectGlobal(DBG, 'DBG');
+}
+
+// 전역 변수에 일시 정지 관련 변수 추가
+// ... 기존 전역 변수들 ...
+let isPaused = false; // 게임 일시 정지 상태
+let pauseBtn = null; // 일시 정지 버튼
+let pauseMenuDialog = null; // 일시 정지 메뉴 다이얼로그
+let confirmationDialog = null; // 확인 다이얼로그
+let pendingAction = null; // 확인 대기 중인 작업
+let activeAnimations = []; // 활성 애니메이션 목록을 추적하기 위한 배열
+
+// 게임 일시 정지 함수
+function pauseGame() {
+    if (isPaused || timeLeft <= 0) return; // 이미 일시 정지 상태이거나 게임이 종료된 경우 무시
+    
+    isPaused = true;
+    
+    // 게임 타이머 일시 정지
+    gameTimer.pause();
+    
+    // 힌트 표시 타이머 일시 정지
+    hintDisplayTimer.pause();
+    
+    // 힌트 생성 타이머 일시 정지
+    hintWaitTimer.pause();
+    
+    // 게임 그리드에 일시 정지 시각적 효과 추가
+    gameGridElement.classList.add('paused');
+    
+    // 모든 애니메이션 중지
+    activeAnimations.forEach(id => {
+        cancelAnimationFrame(id);
+    });
+    activeAnimations = [];
+}
+
+// 게임 재개 함수
+function resumeGame() {
+    if (!isPaused) return; // 일시 정지 상태가 아닌 경우 무시
+    
+    isPaused = false;
+    
+    // 타이머 재개
+    if (timeLeft > 0) {
+        gameTimer.resume();
+        // 만약 힌트 표시 타이머가 완료(즉, 힌트 대기 타이머가 진행 중이었음) 이면 힌트 대기 타이머 재개
+        if (hintDisplayTimer.getState() === TimerState.COMPLETED) {
+            hintWaitTimer.resume();
+        }
+        // 만약 힌트 대기 타이머가 완료(즉, 힌트 표시 타이머가 진행 중이었음) 이면 힌트 표시 타이머 재개
+        if (hintWaitTimer.getState() === TimerState.COMPLETED) {
+            hintDisplayTimer.resume();
+        }
+    }
+    
+    // 게임 그리드에서 일시 정지 효과 제거
+    gameGridElement.classList.remove('paused');
+}
+
+// 확인 다이얼로그 표시 함수
+function showConfirmation(title, message) {
+    document.getElementById('confirmation-title').textContent = title;
+    document.getElementById('confirmation-message').textContent = message;
+    confirmationDialog.showModal();
+}
+
+
+// Timer 객체 생성 함수
+function createTimer(callback, delay) {
+    return new Timer(callback, delay);
 }

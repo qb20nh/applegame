@@ -580,3 +580,212 @@ h1 {
     color: white;
     font-weight: bold;
 }
+
+/* 일시 정지 버튼 스타일 */
+.pause-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background-color: var(--color-button);
+    color: white;
+    border: none;
+    font-size: 24px;
+    box-shadow: 0 4px 8px var(--color-shadow-deep);
+    cursor: pointer;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s, background-color 0.2s;
+    padding: 0;
+}
+
+.pause-btn:hover {
+    background-color: var(--color-button-hover);
+    transform: scale(1.05);
+}
+
+.pause-btn:active {
+    transform: scale(0.95);
+}
+
+/* 일시 정지 메뉴 다이얼로그 스타일 */
+.pause-dialog {
+    background-color: transparent;
+    border: none;
+    width: 100%;
+    max-width: 400px;
+    padding: 0;
+}
+
+.pause-dialog::backdrop {
+    background-color: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(2px);
+}
+
+.pause-dialog .dialog-content {
+    background-color: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 4px 12px var(--color-shadow-deep);
+}
+
+.pause-dialog h2 {
+    text-align: center;
+    margin: 0 0 20px 0;
+    color: var(--color-title);
+}
+
+.pause-menu-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.pause-menu-btn {
+    padding: 12px 0;
+    font-size: 16px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+    font-weight: bold;
+}
+
+#continue-btn {
+    background-color: #4CAF50;
+    color: white;
+}
+
+#continue-btn:hover {
+    background-color: #3e8e41;
+}
+
+#restart-from-pause-btn {
+    background-color: #ff9800;
+    color: white;
+}
+
+#restart-from-pause-btn:hover {
+    background-color: #e68a00;
+}
+
+#give-up-btn {
+    background-color: #f44336;
+    color: white;
+}
+
+#give-up-btn:hover {
+    background-color: #d32f2f;
+}
+
+.pause-menu-btn:active {
+    transform: scale(0.98);
+}
+
+/* 확인 다이얼로그 스타일 */
+.confirmation-dialog {
+    background-color: transparent;
+    border: none;
+    width: 100%;
+    max-width: 350px;
+    padding: 0;
+}
+
+.confirmation-dialog::backdrop {
+    background-color: rgba(0, 0, 0, 0.7);
+}
+
+.confirmation-dialog .dialog-content {
+    background-color: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 4px 12px var(--color-shadow-deep);
+}
+
+.confirmation-dialog h2 {
+    text-align: center;
+    margin: 0 0 10px 0;
+    color: var(--color-title);
+}
+
+.confirmation-dialog p {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.confirmation-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+}
+
+.confirmation-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.2s, transform 0.1s;
+}
+
+#confirm-yes-btn {
+    background-color: #f44336;
+    color: white;
+}
+
+#confirm-yes-btn:hover {
+    background-color: #d32f2f;
+}
+
+#confirm-no-btn {
+    background-color: #9e9e9e;
+    color: white;
+}
+
+#confirm-no-btn:hover {
+    background-color: #757575;
+}
+
+.confirmation-btn:active {
+    transform: scale(0.95);
+}
+
+/* 모바일 화면 최적화 */
+@media (max-width: 768px) {
+    .pause-btn {
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+        bottom: 15px;
+        right: 15px;
+    }
+    
+    .pause-dialog .dialog-content,
+    .confirmation-dialog .dialog-content {
+        padding: 15px;
+    }
+}
+
+/* 일시 정지 상태 스타일 */
+.game-grid.paused {
+    filter: blur(2px) grayscale(50%);
+    opacity: 0.8;
+    pointer-events: none;
+    transition: filter 0.3s, opacity 0.3s;
+}
+
+/* 시간 경고 효과 */
+.timer .time-warning {
+    color: #ff3860;
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}

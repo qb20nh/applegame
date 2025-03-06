@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Make 10</title>
-    <link rel="stylesheet" href="numbergame.min.css">
+    <link rel="stylesheet" href="numbergame.css">
 </head>
 <body>
     <h1>Make 10</h1>
@@ -46,7 +46,34 @@
         </div>
     </dialog>
 
+    <!-- 일시 정지 메뉴 다이얼로그 -->
+    <dialog id="pause-menu-dialog" class="pause-dialog">
+        <div class="dialog-content">
+            <h2>일시 정지</h2>
+            <div class="pause-menu-buttons">
+                <button id="continue-btn" class="pause-menu-btn">계속하기</button>
+                <button id="restart-from-pause-btn" class="pause-menu-btn">다시 시작하기</button>
+                <button id="give-up-btn" class="pause-menu-btn">포기하기</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- 확인 다이얼로그 (다시 시작하기/포기하기 확인용) -->
+    <dialog id="confirmation-dialog" class="confirmation-dialog">
+        <div class="dialog-content">
+            <h2 id="confirmation-title">확인</h2>
+            <p id="confirmation-message">정말로 이 작업을 진행하시겠습니까?</p>
+            <div class="confirmation-buttons">
+                <button id="confirm-yes-btn" class="confirmation-btn">예</button>
+                <button id="confirm-no-btn" class="confirmation-btn">아니오</button>
+            </div>
+        </div>
+    </dialog>
+
     <div id="game-grid" class="game-grid"></div>
+    
+    <!-- 일시 정지 버튼 (오른쪽 하단에 고정) -->
+    <button id="pause-btn" class="pause-btn">⏸️</button>
     
     <div class="game-over" id="game-over">
         <div class="game-over-content">
@@ -67,8 +94,9 @@
     </div>
     
     <div id="stage-number">Stage <span class="stage-number">1</span></div>
-    <script type="module" src="numbergame.min.js">
+    <script type="module" src="numbergame.js">
     </script>
+
 </body>
 
 </html>
