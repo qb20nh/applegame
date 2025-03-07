@@ -69,6 +69,10 @@ export class Timer {
     this.listeners = Object.fromEntries(TimerAction.values().map(action => [action, []]));
   }
 
+  get state() {
+    return this.fsm.currentState.value;
+  }
+
   /**
    * 타이머 시작
    * @returns {boolean} 타이머 시작 성공 여부
@@ -80,7 +84,6 @@ export class Timer {
     
     this.startTime = Date.now();
     this.timerId = setTimeout(() => this.#complete(), this.remaining);
-    console.log('Timer started with time:', this.remaining);
     
     return true;
   }
@@ -94,9 +97,8 @@ export class Timer {
         return false;
     }
     
-    this.fsm.executeAction(TimerAction.PAUSE.value);
-    
     clearTimeout(this.timerId);
+    this.timerId = null;
     this.remaining -= Date.now() - this.startTime;
     
     return true;
@@ -112,6 +114,9 @@ export class Timer {
     }
     
     this.startTime = Date.now();
+    if (this.timerId) {
+      throw new Error('Timer already started');
+    }
     this.timerId = setTimeout(() => this.#complete(), this.remaining);
     
     return true;
@@ -145,6 +150,16 @@ export class Timer {
       
       this.timerId = null;
       this.remaining = 0;
+      
+      // 콜백 함수 실행
+      console.log('타이머 완료: 콜백 실행');
+      if (this.callback && typeof this.callback === 'function') {
+        try {
+          this.callback();
+        } catch (error) {
+          console.error('타이머 콜백 실행 중 오류:', error);
+        }
+      }
   }
 
   /**
@@ -159,9 +174,10 @@ export class Timer {
    * 남은 시간 반환 (밀리초)
    * @returns {number} 남은 시간 (밀리초)
    */
-  getTimeRemaining() {
-    if (this.fsm.currentState === TimerState.RUNNING.value) {
-      return Math.max(0, this.remaining - (Date.now() - this.startTime));
+  getRemainingTime() {
+    if (this.fsm.currentState === TimerState.RUNNING) {
+      const elapsed = Date.now() - this.startTime;
+      return Math.max(0, this.remaining - elapsed);
     }
     
     return this.remaining;

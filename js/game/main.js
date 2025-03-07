@@ -1,12 +1,42 @@
-import { Timer, TimerState, TimerAction } from './timer.js';
-import { isLocalhost } from './util.js';
-import { SeededRandom, pseudoPermutation } from './random.js';
-
-injectGlobal(TimerState, 'TimerState');
-injectGlobal(TimerAction, 'TimerAction');
+import { Timer, TimerState, TimerAction } from '../utils/timer.js';
+import { FSM } from '../utils/fsm.js';
+import { isLocalhost } from '../utils/util.js';
+import { SeededRandom, pseudoPermutation } from '../utils/random.js';
 
 const noop = () => {};
 const IS_LOCALHOST = isLocalhost();
+const injectGlobal = IS_LOCALHOST ? (func, name = func.name) => {
+    globalThis[name] = func;
+} : noop;
+injectGlobal(injectGlobal);
+
+const gameState = FSM.simple({
+    'loading': {
+        'load': 'stage_select'
+    },
+    'stage_select': {
+        'select': 'playing'
+    },
+    'playing': {
+        'pause': 'paused',
+        'game_over': 'game_result',
+        'clear': 'clear_result'
+    },
+    'paused': {
+        'resume': 'playing',
+        'give_up': 'stage_select',
+        'restart': 'playing'
+    },
+    'game_result': {
+        'restart': 'playing',
+        'next': 'playing',
+        'go_back': 'stage_select'
+    },
+    'clear_result': {
+        'restart': 'playing',
+        'go_back': 'stage_select'
+    }
+});
 
 // 시드 기반 난수 생성 관련 변수 및 함수
 let currentSeed = 12345;
@@ -73,7 +103,12 @@ let timeLeft = TIME_LIMIT;
 let timerUIUpdateInterval;
 let gameTimer = new Timer(() => {
     clearInterval(timerUIUpdateInterval);
-    endGame('시간 초과!');
+    // 숫자 폭발 애니메이션 후 그리드 셀 폭발 애니메이션, 그 후 게임 오버
+    explodeTimerDisplay(() => {
+        explodeCellsGrid(() => {
+            endGame('시간 초과!');
+        });
+    });
 }, TIME_LIMIT * 1000);
 injectGlobal(gameTimer, 'gameTimer');
 gameTimer.onStart(() => {
@@ -98,13 +133,34 @@ let selectionStartCell = null;
 let selectionEndCell = null;  // 선택 종료 셀 추가
 let emptyCellCount = 0;
 let currentSelection = [];
+let lastClearTime;
 let selectedSum = 0;
 let currentSelectionSize = null;
-let lastClearTime = 0; // 마지막으로 셀을 클리어한 시간
 let hintWaitTimer = new Timer(showHint, HINT_DELAY); // 힌트 대기 타이머
-let hintDisplayTimer = new Timer(findHints, HINT_DURATION); // 힌트 표시 타이머
+let hintDisplayTimer = new Timer(hideHint, HINT_DURATION); // 힌트 표시 타이머
 hintWaitTimer.then(hintDisplayTimer);
 hintDisplayTimer.then(hintWaitTimer);
+
+hintWaitTimer.onStart(() => {
+    console.log('hintWaitTimer start');
+})
+hintDisplayTimer.onStart(() => {
+    console.log('hintDisplayTimer start');
+})
+hintWaitTimer.onResume(() => {
+    console.log('hintWaitTimer resume');
+})
+hintDisplayTimer.onResume(() => {
+    console.log('hintDisplayTimer resume');
+})
+hintWaitTimer.onPause(() => {
+    console.log('hintWaitTimer pause');
+})
+hintDisplayTimer.onPause(() => {
+    console.log('hintDisplayTimer pause');
+})
+
+
 
 let currentHint = null; // 현재 표시 중인 힌트
 let isHintVisible = false; // 힌트 표시 상태
@@ -131,9 +187,6 @@ let timeElement = document.getElementById('time');
 let scoreElement = document.getElementById('score');
 let sumElement = document.getElementById('sum');
 let gameOverElement = document.getElementById('game-over');
-let resultMessageElement = document.getElementById('result-message');
-let gameEndReasonElement = document.getElementById('game-end-reason');
-let finalScoreElement = document.getElementById('final-score');
 let restartBtn = document.getElementById('restart-btn');
 let stageClearInfoElement = document.getElementById('stage-clear-info');
 let stageStarsElement = document.getElementById('stage-stars');
@@ -179,7 +232,7 @@ function initGame(seed) {
     document.getElementById('game-over').style.display = 'none';
     document.getElementById('sum').textContent = '0';
     document.getElementById('time').textContent = (timeLeft).toFixed(1);
-    document.getElementById('time').classList.remove('time-warning');
+    document.getElementById('time').classList.remove('time-warning', 'time-blink-10', 'time-blink-5', 'time-blink-1');
     
     // 게임 그리드에서 일시정지 효과 제거
     if (gameGridElement) {
@@ -207,6 +260,21 @@ function initGame(seed) {
     precomputeHints();
 }
 
+import { halfSquare, halfStripes, verticalStripes, donuts, checker, diagonalStripes } from './patterns.js';
+
+function getColor(stage, row, col, ROWS, COLS) {
+    const patternGenerators = [
+        halfSquare,
+        halfStripes,
+        verticalStripes,
+        donuts,
+        checker,
+        diagonalStripes
+    ]
+    const patternGenerator = patternGenerators[stage % patternGenerators.length];
+    return patternGenerator(row, col, ROWS, COLS);
+}
+
 function initGrid() {
     grid = [];
     for (let i = 0; i < ROWS; i++) {
@@ -214,12 +282,12 @@ function initGrid() {
         for (let j = 0; j < COLS; j++) {
             // 각 셀에 값, 레이어 깊이, 색상 정보 추가
             // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색으로 시작
-            const isRightHalf = j >= COLS / 2; // 오른쪽 절반 여부 확인
+            const isBlue = getColor(currentStageNumber, i, j, ROWS, COLS); // 오른쪽 절반 여부 확인
             
             row.push({
                 value: getRandom().nextInt(1, 9), // 시드 기반 난수 생성
-                layerDepth: isRightHalf ? 1 : 0, // 초기 레이어 깊이
-                color: isRightHalf ? COLORS[1] : COLORS[0] // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색
+                layerDepth: isBlue ? 1 : 0, // 초기 레이어 깊이
+                color: isBlue ? COLORS[1] : COLORS[0] // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색
             });
         }
         grid.push(row);
@@ -238,9 +306,6 @@ function initDom() {
     
     // 게임 오버 화면 요소
     gameOverElement = document.getElementById('game-over');
-    resultMessageElement = document.getElementById('result-message');
-    gameEndReasonElement = document.getElementById('game-end-reason');
-    finalScoreElement = document.getElementById('final-score');
     stageClearInfoElement = document.getElementById('stage-clear-info');
     stageStarsElement = document.getElementById('stage-stars');
     
@@ -274,9 +339,9 @@ function initDom() {
     
     // 일시 정지 버튼 클릭 이벤트
     pauseBtn.addEventListener('click', () => {
-        // 게임 일시 정지 및 메뉴 표시
-        pauseGame();
+        // 다이얼로그를 먼저 표시한 후 게임 일시 정지
         pauseMenuDialog.showModal();
+        pauseGame();
     });
     
     // 일시 정지 메뉴 버튼 이벤트 설정
@@ -665,7 +730,7 @@ function endSelection(e) {
         
         // 힌트가 표시 중이면 제거하고 타이머도 정리
         if (isHintVisible) {
-            hideHint(false); // 타이머 재설정하지 않음
+            hideHint(true);
         }
         return;
         
@@ -1121,6 +1186,12 @@ function findHints() {
             }
         }
     }
+
+    if (hints.length === 0) {
+        console.log("힌트를 찾을 수 없습니다. 더 이상 가능한 조합이 없습니다.");
+        endGame('가능한 조합이 없습니다.');
+        return;
+    }
     
     console.log(`PrefixSum 방식으로 ${hints.length}개의 가능한 힌트를 찾았습니다.`);
     console.timeEnd("힌트 검색 (PrefixSum)");
@@ -1143,7 +1214,7 @@ function showHint() {
     
     // 이미 힌트가 표시 중이면 제거
     if (isHintVisible) {
-        hideHint(false); // 타이머 재설정하지 않음
+        hideHint(false);
     }
     
     // 새로운 힌트 세트를 가져올 때마다 인덱스 초기화 (다양한 힌트 표시를 위해)
@@ -1153,13 +1224,6 @@ function showHint() {
     
     // 힌트 계산 (캐시 활용)
     const hints = findHints();
-    
-    // 힌트가 없으면 게임 오버 처리
-    if (hints.length === 0) {
-        console.log("힌트를 찾을 수 없습니다. 더 이상 가능한 조합이 없습니다.");
-        endGame('가능한 조합이 없습니다.');
-        return;
-    }
     
     console.log(`${hints.length}개의 힌트 중에서 표시할 힌트를 선택합니다.`);
     
@@ -1233,13 +1297,12 @@ function hideHint(resetTimer = true) {
     document.querySelectorAll('.cell.hint').forEach(cell => {
         cell.classList.remove('hint');
     });
-    
-    // 힌트 표시 타이머 정리
-    if (hintDisplayTimer) {
-        hintDisplayTimer.clear();
-        hintDisplayTimer = null;
+
+    if (resetTimer) {
+        hintWaitTimer.reset();
+        hintDisplayTimer.reset();
+        hintWaitTimer.start();
     }
-    
     // 상태 초기화
     currentHint = null;
     isHintVisible = false;
@@ -1248,10 +1311,10 @@ function hideHint(resetTimer = true) {
 // 물리 기반 애니메이션 시작
 function startPhysicsAnimation(physics, onComplete) {
     // 일시 정지 상태에서는 애니메이션을 시작하지 않음
-    if (isPaused) {
-        onComplete();
-        return;
-    }
+    // if (isPaused) {
+    //     onComplete();
+    //     return;
+    // }
     
     // 애니메이션 시작 시간 기록
     physics.startTime = performance.now();
@@ -1262,7 +1325,7 @@ function startPhysicsAnimation(physics, onComplete) {
     // 애니메이션 함수
     function animate(timestamp) {
         // 일시 정지 상태라면 애니메이션 중지
-        if (isPaused) {
+        if (gameTimer.state === 'paused') {
             return;
         }
         
@@ -1294,9 +1357,11 @@ function startPhysicsAnimation(physics, onComplete) {
         // 투명도 계산 (후반부에 더 빠르게 투명해짐)
         const normalizedTime = elapsed / (physics.duration / 1000);
         physics.opacity = normalizedTime < 0.7 ? 1 : 1 - ((normalizedTime - 0.7) / 0.3);
+
+        const scale = 1 + normalizedTime * ((physics.scale ?? 1) - 1)
         
         // 스타일 적용
-        physics.element.style.transform = `translate(${physics.x}px, ${physics.y}px) rotate(${physics.rotation}deg)`;
+        physics.element.style.transform = `translate(${physics.x}px, ${physics.y}px) rotate(${physics.rotation}deg) scale(${scale})`;
         physics.element.style.opacity = physics.opacity;
         
         // 다음 프레임 요청
@@ -1323,23 +1388,32 @@ function updateTimerUI() {
     if (isPaused) return;
     
     // 남은 시간 계산 (시간이 지남에 따라 감소)
-    timeLeft = Math.max(0, gameTimer.getTimeRemaining() / 1000);
+    const currentState = gameTimer.getState();
+    const remainingTime = gameTimer.getRemainingTime();
+    
+    timeLeft = Math.max(0, remainingTime / 1000);
     
     // 타이머 표시 업데이트
     timeElement.textContent = timeLeft.toFixed(1);
     
-    // 시간이 10초 이하면 경고 효과 적용
-    if (timeLeft <= 10) {
-        timeElement.classList.add('time-warning');
+    // 기존 모든 타이머 관련 클래스 제거
+    timeElement.classList.remove('time-warning', 'time-blink-10', 'time-blink-5', 'time-blink-1');
+    
+    // 시간에 따라 다른 깜빡임 효과 적용
+    if (timeLeft <= 1) {
+        // 1초 이하: 1초에 5번 깜빡임 (0.2초 간격)
+        timeElement.classList.add('time-blink-1');
+    } else if (timeLeft <= 5) {
+        // 5초 이하: 1초에 2번 깜빡임 (0.5초 간격)
+        timeElement.classList.add('time-blink-5');
+    } else if (timeLeft <= 10) {
+        // 10초 이하: 1초에 한번 깜빡임
+        timeElement.classList.add('time-blink-10');
     }
 }
 
 // 게임 종료
 function endGame(message = '') {
-    if (isGameOver) return; // 이미 게임 오버 상태면 무시
-    
-    isGameOver = true;
-    
     // 타이머 정리
     gameTimer.reset();
     hintWaitTimer.reset();
@@ -1368,9 +1442,6 @@ function endGame(message = '') {
         }
         gameOverElement.style.display = 'flex';
     }
-    
-    // 이벤트 리스너 제거
-    removeGameEventListeners();
 }
 
 // 힌트 미리 계산하기 - 상태 변경 후 즉시 실행하여 응답성 향상
@@ -1641,10 +1712,6 @@ function selectStage(stageNumber) {
     initGame(stageSeed);
 }
 
-function injectGlobal(func, name = func.name) {
-    globalThis[name] = func;
-}
-
 // 터치 이벤트 핸들러 - 터치 이벤트를 포인터 이벤트로 변환
 function handleTouchStart(e) {
     // 게임 영역 내에서만 스크롤 방지
@@ -1760,6 +1827,9 @@ function pauseGame() {
     // 힌트 생성 타이머 일시 정지
     hintWaitTimer.pause();
     
+    // 시간 깜빡임 애니메이션 제거
+    timeElement.classList.remove('time-warning', 'time-blink-10', 'time-blink-5', 'time-blink-1');
+    
     // 게임 그리드에 일시 정지 시각적 효과 추가
     gameGridElement.classList.add('paused');
     
@@ -1779,17 +1849,21 @@ function resumeGame() {
     // 타이머 재개
     if (timeLeft > 0) {
         gameTimer.resume();
-        // 만약 힌트 표시 타이머가 완료(즉, 힌트 대기 타이머가 진행 중이었음) 이면 힌트 대기 타이머 재개
-        if (hintDisplayTimer.getState() === TimerState.COMPLETED) {
-            hintWaitTimer.resume();
-        }
-        // 만약 힌트 대기 타이머가 완료(즉, 힌트 표시 타이머가 진행 중이었음) 이면 힌트 표시 타이머 재개
-        if (hintWaitTimer.getState() === TimerState.COMPLETED) {
-            hintDisplayTimer.resume();
-        }
+        hintWaitTimer.resume();
+        hintDisplayTimer.resume();
+
     }
     
-    // 게임 그리드에서 일시 정지 효과 제거
+    // 시간에 따라 깜빡임 효과 다시 적용
+    if (timeLeft <= 1) {
+        timeElement.classList.add('time-blink-1');
+    } else if (timeLeft <= 5) {
+        timeElement.classList.add('time-blink-5');
+    } else if (timeLeft <= 10) {
+        timeElement.classList.add('time-blink-10');
+    }
+    
+    // 게임 그리드에서 일시 정지 시각적 효과 제거
     gameGridElement.classList.remove('paused');
 }
 
@@ -1804,4 +1878,243 @@ function showConfirmation(title, message) {
 // Timer 객체 생성 함수
 function createTimer(callback, delay) {
     return new Timer(callback, delay);
+}
+
+
+// 타이머 디스플레이 폭발 애니메이션
+function explodeTimerDisplay(onComplete) {
+    console.log('=== 타이머 폭발 애니메이션 시작 ===');
+    
+    // 타이머 요소의 원래 내용 저장 (0.0)
+    const originalTime = timeElement.textContent;
+    console.log(`현재 타이머 값: ${originalTime}`);
+    
+    // 모든 인터랙션 비활성화
+    // 이미 isPaused를 사용하여 인터랙션을 제어하므로 임시로 일시정지 상태로 설정
+    const wasAlreadyPaused = isPaused;
+    isPaused = true;
+    
+    // 타이머 요소의 위치와 크기 정보 저장
+    const timerRect = timeElement.getBoundingClientRect();
+    
+    // 폭발할 숫자들을 담을 컨테이너 생성
+    const explodingContainer = document.createElement('div');
+    explodingContainer.style.position = 'absolute';
+    explodingContainer.style.left = `${timerRect.left}px`;
+    explodingContainer.style.top = `${timerRect.top}px`;
+    explodingContainer.style.width = `${timerRect.width}px`;
+    explodingContainer.style.height = `${timerRect.height}px`;
+    explodingContainer.style.fontSize = window.getComputedStyle(timeElement).fontSize;
+    explodingContainer.style.fontFamily = window.getComputedStyle(timeElement).fontFamily;
+    explodingContainer.style.fontWeight = window.getComputedStyle(timeElement).fontWeight;
+    explodingContainer.style.color = window.getComputedStyle(timeElement).color;
+    explodingContainer.style.display = 'flex';
+    explodingContainer.style.justifyContent = 'center';
+    explodingContainer.style.zIndex = '1000';
+    
+    // 원래의 타이머 숫자 숨기기
+    timeElement.style.visibility = 'hidden';
+    
+    // 문서에 컨테이너 추가
+    document.body.appendChild(explodingContainer);
+    
+    // 숫자 문자열을 각 문자로 분리 (0.0)
+    const characters = originalTime.split('');
+    
+    // 각 문자에 대한 요소 생성
+    const characterElements = characters.map(char => {
+        const charElement = document.createElement('div');
+        charElement.textContent = char;
+        charElement.style.display = 'inline-block';
+        charElement.style.position = 'relative';
+        explodingContainer.appendChild(charElement);
+        return charElement;
+    });
+    
+    // 모든 애니메이션 완료를 추적할 카운터
+    let completedAnimations = 0;
+    
+    // 각 문자에 물리 애니메이션 적용
+    characterElements.forEach(element => {
+        // 소수점은 작은 흔들림만 주고 빠르게 사라지게
+        const isDot = element.textContent === '.';
+        
+        // 물리 애니메이션 파라미터 설정
+        const physics = {
+            element: element,
+            // 각도: 45~135도 사이 (위쪽 방향)
+            angle: (45 + getRandom().next() * 90) * Math.PI / 180,
+            // 초기 속도: 200~300 픽셀/초
+            initialSpeed: 200 + getRandom().next() * 100,
+            // 회전 속도: -360~360도/초
+            rotationSpeed: -360 + getRandom().next() * 720,
+            // 중력 가속도: 980 픽셀/초^2 (물리학적 중력과 유사)
+            gravity: 980,
+            // 애니메이션 지속 시간: 0.8~1.2초
+            duration: 400 + getRandom().next() * 400,
+            // 타임스탬프 초기화
+            opacity: 1,
+            x: 0,
+            y: 0,
+            rotation: 0
+        };
+        
+        // 물리 애니메이션 시작
+        startPhysicsAnimation(physics, () => {
+            // 애니메이션 완료 카운트 증가
+            completedAnimations++;
+            
+            // 모든 애니메이션이 완료되면 정리 및 콜백 실행
+            if (completedAnimations === characterElements.length) {
+                // 컨테이너 제거
+                document.body.removeChild(explodingContainer);
+                
+                // 원래 타이머 요소 표시 (필요한 경우)
+                // timeElement.style.visibility = 'visible';
+                
+                // 원래 게임이 일시정지 상태가 아니었다면 일시정지 해제
+                isPaused = wasAlreadyPaused;
+                
+                // 콜백 실행
+                onComplete?.();
+            }
+        });
+    });
+}
+
+// 그리드 셀 폭발 애니메이션
+function explodeCellsGrid(onComplete) {
+    console.log('=== 그리드 셀 폭발 애니메이션 시작 ===');
+    
+    // 모든 인터랙션 비활성화
+    const wasAlreadyPaused = isPaused;
+    isPaused = true;
+    
+    // 현재 그리드의 모든 셀 요소 수집
+    const cellElements = document.querySelectorAll('.cell:not(.empty)');
+    console.log(`애니메이션 적용할 셀 수: ${cellElements.length}`);
+    
+    if (cellElements.length === 0) {
+        // 셀이 없으면 즉시 완료
+        isPaused = wasAlreadyPaused;
+        if (onComplete && typeof onComplete === 'function') {
+            onComplete();
+        }
+        return;
+    }
+    
+    // 모든 애니메이션 완료를 추적할 카운터
+    let completedAnimations = 0;
+    const totalAnimations = cellElements.length;
+    
+    // 정규 분포 파라미터 설정
+    const MEAN_DELAY = 1000; // 평균 지연 시간 (ms)
+    const STD_DEVIATION = 500; // 표준 편차 (ms)
+    const MIN_DELAY = 0; // 최소 지연 시간
+    const MAX_DELAY = 2000; // 최대 지연 시간
+    
+    // 정규 분포 난수 생성 (Box-Muller 변환 사용)
+    function getNormalRandom(mean, stdDev) {
+        // Box-Muller 변환을 사용한 정규 분포 난수 생성
+        const u1 = Math.random();
+        const u2 = Math.random();
+        
+        // 표준 정규 분포 난수 생성 (평균 0, 표준편차 1)
+        const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+        
+        // 원하는 평균과 표준편차로 변환
+        return mean + z0 * stdDev;
+    }
+    
+    // 난수 값을 범위 내로 제한하는 함수
+    function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    }
+    
+    // 모든 셀에 대해 정규 분포된 지연 후 물리 애니메이션 적용
+    cellElements.forEach(element => {
+        // 정규 분포 지연 시간 생성 및 범위 제한
+        const delay = clamp(getNormalRandom(MEAN_DELAY, STD_DEVIATION), MIN_DELAY, MAX_DELAY);
+        
+        // 지연 후 애니메이션 시작
+        setTimeout(() => {
+            // 물리 애니메이션 파라미터
+            const physics = {
+                // 각도: 45~135도 사이 (위쪽 방향)
+                angle: (45 + getRandom().next() * 90) * Math.PI / 180,
+                // 초기 속도: 200~300 픽셀/초
+                initialSpeed: 200 + getRandom().next() * 100,
+                // 회전 속도: -360~360도/초
+                rotationSpeed: -360 + getRandom().next() * 720,
+                // 중력 가속도: 980 픽셀/초^2 (물리학적 중력과 유사)
+                gravity: 980,
+                // 애니메이션 지속 시간: 0.8~1.2초
+                duration: 400 + getRandom().next() * 400,
+                // 타임스탬프 초기화
+                startTime: null,
+                // 위치 및 회전 추적
+                x: 0,
+                y: 0,
+                rotation: 0,
+                opacity: 1,
+                element: element
+            };
+            
+            // 애니메이션 시작 전 원래 셀의 색상과 내용 복사
+            const cellRect = element.getBoundingClientRect();
+            const cellStyle = window.getComputedStyle(element);
+            
+            // 원래 셀 숨기기
+            element.style.visibility = 'hidden';
+            
+            // 새 요소 생성하여 원래 셀을 복제
+            const cloneElement = document.createElement('div');
+            cloneElement.className = element.className;
+            cloneElement.innerHTML = element.innerHTML;
+            cloneElement.style.position = 'absolute';
+            cloneElement.style.left = `${cellRect.left}px`;
+            cloneElement.style.top = `${cellRect.top}px`;
+            cloneElement.style.width = `${cellRect.width}px`;
+            cloneElement.style.height = `${cellRect.height}px`;
+            cloneElement.style.zIndex = '999';
+            cloneElement.style.borderRadius = cellStyle.borderRadius;
+            cloneElement.style.backgroundColor = cellStyle.backgroundColor;
+            
+            // 문서에 복제 요소 추가
+            document.body.appendChild(cloneElement);
+            
+            // 물리 애니메이션에는 복제된 요소 사용
+            physics.element = cloneElement;
+            
+            // 애니메이션 시작
+            startPhysicsAnimation(physics, () => {
+                // 복제 요소 제거
+                if (document.body.contains(cloneElement)) {
+                    document.body.removeChild(cloneElement);
+                }
+                
+                // 애니메이션 완료 카운트 증가
+                completedAnimations++;
+                
+                // 모든 애니메이션 완료 확인
+                if (completedAnimations === totalAnimations) {
+                    console.log('모든 셀 애니메이션 완료');
+                    
+                    // 원래 셀 다시 표시
+                    cellElements.forEach(cell => {
+                        cell.style.visibility = 'visible';
+                        timeElement.style.visibility = 'visible';
+                    });
+                    
+                    // 일시정지 상태 복원
+                    isPaused = wasAlreadyPaused;
+                    
+                    // 콜백 실행
+                    if (onComplete && typeof onComplete === 'function') {
+                        onComplete();
+                    }
+                }
+            });
+        }, delay);
+    });
 }

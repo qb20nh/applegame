@@ -203,10 +203,8 @@ export class FSM {
     const nextState = actionMap.get(action);
     
     if (!nextState) {
-      console.log('executeAction failed:', this.#currentState?.toString?.(), `-[${action}]->`, nextState?.toString?.());
       return false; // 현재 상태에서 해당 액션 실행 불가
     }
-    console.log('executeAction success:', this.#currentState?.toString?.(), `-[${action}]->`, nextState?.toString?.());
     
     const previousState = this.#currentState;
     this.#currentState = nextState;
