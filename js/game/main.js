@@ -222,6 +222,12 @@ function initGame(seed) {
     timeLeft = TIME_LIMIT; // 게임 시간 초기화
     isPaused = false;
     
+    // 누적 합 테이블 초기화
+    prefixSumTable = null;
+    orangePrefixSumTable = null;
+    bluePrefixSumTable = null;
+    cachedHints = null;
+    
     // 게임 타이머 초기화 (Timer 클래스 사용)
     gameTimer.reset();
     
@@ -256,6 +262,9 @@ function initGame(seed) {
     gameTimer.start();
     // 힌트 대기 타이머 시작
     hintWaitTimer.start();
+    
+    // 누적 합 테이블 다시 계산 (스테이지 변경 시 필요)
+    buildAllPrefixSums();
     
     // 최초 힌트 캐시 계산
     precomputeHints();
@@ -407,6 +416,13 @@ function initDom() {
         
         // 게임 오버 화면 숨기기
         gameOverElement.style.display = 'none';
+        
+        // 힌트 관련 변수 명시적 초기화
+        prefixSumTable = null;
+        orangePrefixSumTable = null;
+        bluePrefixSumTable = null;
+        cachedHints = null;
+        gameStateChanged = true;
         
         // 새 스테이지로 게임 초기화
         initGame(generateStageSeed(currentStageNumber));
@@ -1126,7 +1142,7 @@ function findHints() {
     const hints = [];
     
     // 누적 합 테이블 구축 또는 업데이트
-    if (!prefixSumTable || !orangePrefixSumTable || !bluePrefixSumTable) {
+    if (!prefixSumTable || !orangePrefixSumTable || !bluePrefixSumTable || gameStateChanged) {
         console.log("누적 합 테이블 새로 구축");
         buildAllPrefixSums();
     } else {
@@ -1449,6 +1465,13 @@ function endGame(message = '') {
         // 점수 애니메이션 (스테이지 클리어가 아닌 경우에만)
         const stageClearInfoElement = document.getElementById('stage-clear-info');
         const scoreDisplayElement = document.querySelector('.score-display');
+        
+        // 스테이지 클리어가 아닌 경우, 스테이지 클리어 정보를 숨기고 다음 스테이지 버튼도 숨김
+        stageClearInfoElement.style.display = 'none';
+        const nextStageBtn = document.getElementById('next-stage-btn');
+        if (nextStageBtn) {
+            nextStageBtn.style.display = 'none';
+        }
         
         if (scoreDisplayElement && stageClearInfoElement && stageClearInfoElement.style.display !== 'block') {
             // 초기 상태: 0점
@@ -2224,6 +2247,12 @@ function checkStageCompletion(message) {
             const stageClearInfoElement = document.getElementById('stage-clear-info');
             if (stageClearInfoElement) {
                 stageClearInfoElement.style.display = 'block';
+                
+                // '다음 스테이지' 버튼 표시
+                const nextStageBtn = document.getElementById('next-stage-btn');
+                if (nextStageBtn) {
+                    nextStageBtn.style.display = 'block';
+                }
                 
                 // 별점 및 점수 요소 가져오기
                 const starsElement = document.querySelector('.stage-stars');
