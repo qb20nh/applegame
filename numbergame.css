@@ -772,10 +772,24 @@ h1 {
 
 /* 일시 정지 상태 스타일 */
 .game-grid.paused {
-    filter: blur(2px) grayscale(50%);
-    opacity: 0.8;
+    filter: blur(3px) grayscale(70%);
+    opacity: 0.7;
     pointer-events: none;
-    transition: filter 0.3s, opacity 0.3s;
+    transition: opacity 0.3s;
+    position: relative;
+}
+
+.game-grid.paused::after {
+    content: "일시정지";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 32px;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.8);
+    text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.7);
+    z-index: 10;
 }
 
 /* 시간 경고 효과 */
@@ -812,4 +826,37 @@ h1 {
     0% { opacity: 1; }
     50% { opacity: 0; }
     100% { opacity: 1; }
+}
+
+/* 별 애니메이션 효과 */
+@keyframes starPop {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.5);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+.star-pop {
+    animation: starPop 0.5s ease-out;
+    display: inline-block;
+}
+
+/* 점수 표시 애니메이션 */
+.score-display {
+    transition: color 0.3s;
+    font-weight: bold;
+    position: relative;
+}
+
+/* 별 애니메이션 시 글로벌 스타일 */
+.stage-stars {
+    min-height: 1.5em;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }

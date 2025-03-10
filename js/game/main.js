@@ -106,7 +106,8 @@ let gameTimer = new Timer(() => {
     // 숫자 폭발 애니메이션 후 그리드 셀 폭발 애니메이션, 그 후 게임 오버
     explodeTimerDisplay(() => {
         explodeCellsGrid(() => {
-            endGame('시간 초과!');
+            // 시간 초과 처리 함수 호출
+            checkStageCompletion('시간 초과!');
         });
     });
 }, TIME_LIMIT * 1000);
@@ -260,18 +261,18 @@ function initGame(seed) {
     precomputeHints();
 }
 
-import { halfSquare, halfStripes, verticalStripes, donuts, checker, diagonalStripes } from './patterns.js';
+import * as patterns from './patterns.js';
 
 function getColor(stage, row, col, ROWS, COLS) {
     const patternGenerators = [
-        halfSquare,
-        halfStripes,
-        verticalStripes,
-        donuts,
-        checker,
-        diagonalStripes
+        patterns.halfSquare,
+        patterns.halfStripes,
+        patterns.verticalStripes,
+        patterns.donuts,
+        patterns.checker,
+        patterns.diagonalStripes
     ]
-    const patternGenerator = patternGenerators[stage % patternGenerators.length];
+    const patternGenerator = patternGenerators[(stage - 1) % patternGenerators.length];
     return patternGenerator(row, col, ROWS, COLS);
 }
 
@@ -729,12 +730,9 @@ function endSelection(e) {
         lastClearTime = Date.now();
         
         // 힌트가 표시 중이면 제거하고 타이머도 정리
-        if (isHintVisible) {
-            hideHint(true);
-        }
+        hideHint(true);
+
         return;
-        
-        // 게임 종료 조건은 나중에 추가할 수 있음 (예: 모든 셀이 특정 레이어에 도달)
     }
     clearSelection();
 }
@@ -1110,6 +1108,13 @@ function isDuplicateHint(hints, cells) {
 
 // 힌트 검색 - 합이 TARGET_SUM이 되는 영역 찾기 (효율적인 누적 합 테이블 사용)
 function findHints() {
+    // 게임이 이미 종료된 상태인지 확인
+    const gameOverElement = document.getElementById('game-over');
+    if (gameOverElement && gameOverElement.style.display === 'flex') {
+        console.log("게임이 이미 종료되어 힌트 검색을 중단합니다.");
+        return null;
+    }
+
     // 게임 상태가 변경되지 않았고 캐시된 힌트가 있으면 재사용
     if (!gameStateChanged && cachedHints && cachedHints.length > 0) {
         console.log(`게임 상태가 변경되지 않아 캐시된 힌트(${cachedHints.length}개)를 재사용합니다.`);
@@ -1189,7 +1194,7 @@ function findHints() {
 
     if (hints.length === 0) {
         console.log("힌트를 찾을 수 없습니다. 더 이상 가능한 조합이 없습니다.");
-        endGame('가능한 조합이 없습니다.');
+        checkStageCompletion('가능한 조합이 없습니다.');
         return;
     }
     
@@ -1440,6 +1445,55 @@ function endGame(message = '') {
         if (messageElement) {
             messageElement.textContent = message || '게임 종료!';
         }
+        
+        // 점수 애니메이션 (스테이지 클리어가 아닌 경우에만)
+        const stageClearInfoElement = document.getElementById('stage-clear-info');
+        const scoreDisplayElement = document.querySelector('.score-display');
+        
+        if (scoreDisplayElement && stageClearInfoElement && stageClearInfoElement.style.display !== 'block') {
+            // 초기 상태: 0점
+            scoreDisplayElement.textContent = '0';
+            
+            // 애니메이션 시작 시간
+            const startTime = performance.now();
+            // 애니메이션 지속 시간 (밀리초)
+            const duration = 1000;
+            
+            // 애니메이션 함수
+            function animateScore(currentTime) {
+                // 경과 시간 계산 (0~1 범위)
+                const elapsed = Math.min(1, (currentTime - startTime) / duration);
+                
+                // 이징 함수 적용 (부드러운 시작과 종료)
+                const eased = elapsed;
+                
+                // 현재 점수 계산
+                const currentScore = Math.floor(eased * score);
+                
+                // 점수 업데이트
+                scoreDisplayElement.textContent = currentScore;
+                
+                // 애니메이션 완료 여부 확인
+                if (elapsed < 1) {
+                    // 애니메이션 계속
+                    requestAnimationFrame(animateScore);
+                }
+            }
+            
+            // 애니메이션 시작
+            requestAnimationFrame(animateScore);
+            
+            // 게임 오버 컨텐츠에 애니메이션 클래스 추가
+            const gameOverContent = document.querySelector('.game-over-content');
+            if (gameOverContent) {
+                gameOverContent.classList.add('animating');
+                // 애니메이션 완료 후 클래스 제거
+                setTimeout(() => {
+                    gameOverContent.classList.remove('animating');
+                }, duration);
+            }
+        }
+        
         gameOverElement.style.display = 'flex';
     }
 }
@@ -1452,10 +1506,20 @@ function precomputeHints() {
     
     // 힌트 계산 및 캐시 업데이트 - 백그라운드에서 처리하여 UI 응답성 유지
     setTimeout(() => {
+        // 게임이 이미 종료된 상태인지 확인
+        const gameOverElement = document.getElementById('game-over');
+        if (gameOverElement && gameOverElement.style.display === 'flex') {
+            console.log("게임이 이미 종료되어 힌트 계산을 중단합니다.");
+            return;
+        }
+
         const startTime = performance.now();
         const hints = findHints();
-        const endTime = performance.now();
-        console.log(`힌트 선제 계산 완료: ${hints.length}개 힌트, 소요 시간: ${(endTime - startTime).toFixed(2)}ms`);
+        // hints가 undefined가 아닌 경우에만 로그 출력
+        if (hints) {
+            const endTime = performance.now();
+            console.log(`힌트 선제 계산 완료: ${hints.length}개 힌트, 소요 시간: ${(endTime - startTime).toFixed(2)}ms`);
+        }
     }, 0);
 }
 
@@ -1795,8 +1859,11 @@ const DBG = {
         HINT_DURATION = this.backup.HINT_DURATION;
     },
     gameover() {
-        // immediately end game
-        endGame('테스트용 게임 종료');
+        // 테스트용 게임 종료 처리
+        checkStageCompletion('테스트용 게임 종료');
+    },
+    score(n) {
+        score = n;
     }
 };
 if (IS_LOCALHOST) {
@@ -1833,6 +1900,14 @@ function pauseGame() {
     // 게임 그리드에 일시 정지 시각적 효과 추가
     gameGridElement.classList.add('paused');
     
+    // 모든 셀 숫자 숨기기
+    Object.values(cellElements).forEach(cellElement => {
+        if (!cellElement.classList.contains('empty')) {
+            cellElement.dataset.originalText = cellElement.textContent;
+            cellElement.textContent = '';
+        }
+    });
+    
     // 모든 애니메이션 중지
     activeAnimations.forEach(id => {
         cancelAnimationFrame(id);
@@ -1851,8 +1926,15 @@ function resumeGame() {
         gameTimer.resume();
         hintWaitTimer.resume();
         hintDisplayTimer.resume();
-
     }
+    
+    // 모든 셀 숫자 복원
+    Object.values(cellElements).forEach(cellElement => {
+        if (cellElement.dataset.originalText) {
+            cellElement.textContent = cellElement.dataset.originalText;
+            delete cellElement.dataset.originalText;
+        }
+    });
     
     // 시간에 따라 깜빡임 효과 다시 적용
     if (timeLeft <= 1) {
@@ -2117,4 +2199,129 @@ function explodeCellsGrid(onComplete) {
             });
         }, delay);
     });
+}
+
+/**
+ * 스테이지 완료 여부를 확인하고 적절한 처리를 수행하는 함수
+ * @param {string} message - 표시할 메시지
+ */
+function checkStageCompletion(message) {
+    // 점수가 50점 이상이면 스테이지 클리어로 처리
+    if (score >= 50) {
+        // 스테이지 클리어 처리
+        stageData.clearStage(currentStageNumber, score);
+        
+        // 게임 오버 화면 표시
+        const gameOverElement = document.getElementById('game-over');
+        if (gameOverElement) {
+            // 메시지 설정
+            const messageElement = document.getElementById('game-over-message');
+            if (messageElement) {
+                messageElement.textContent = message;
+            }
+            
+            // 스테이지 클리어 정보 표시
+            const stageClearInfoElement = document.getElementById('stage-clear-info');
+            if (stageClearInfoElement) {
+                stageClearInfoElement.style.display = 'block';
+                
+                // 별점 및 점수 요소 가져오기
+                const starsElement = document.querySelector('.stage-stars');
+                const scoreDisplayElement = document.querySelector('.score-display');
+                
+                if (starsElement && scoreDisplayElement) {
+                    // 초기 상태: 0점, 별 없음
+                    scoreDisplayElement.textContent = '0';
+                    starsElement.textContent = '☆☆☆';
+                    
+                    // 애니메이션 시작 시간
+                    const startTime = performance.now();
+                    // 애니메이션 지속 시간 (밀리초)
+                    const duration = 3000;
+                    
+                    // 애니메이션 함수
+                    function animateScoreAndStars(currentTime) {
+                        // 경과 시간 계산 (0~1 범위)
+                        const elapsed = Math.min(1, (currentTime - startTime) / duration);
+                        
+                        // 이징 함수 적용 (부드러운 시작과 종료)
+                        const eased = elapsed;
+                        
+                        // 현재 점수 계산
+                        const currentScore = Math.floor(eased * score);
+                        
+                        // 점수 업데이트
+                        scoreDisplayElement.textContent = currentScore;
+                        
+                        // 이전 별 상태 저장
+                        const previousStars = starsElement.textContent;
+                        
+                        // 별 업데이트
+                        let newStars;
+                        if (currentScore >= 150) {
+                            newStars = '★★★';
+                        } else if (currentScore >= 100) {
+                            newStars = '★★☆';
+                        } else if (currentScore >= 50) {
+                            newStars = '★☆☆';
+                        } else {
+                            newStars = '☆☆☆';
+                        }
+                        
+                        // 별 상태가 변경되었는지 확인
+                        if (newStars !== previousStars) {
+                            // 별 변화에 애니메이션 효과 적용
+                            starsElement.innerHTML = ''; // 기존 내용 제거
+                            
+                            // 새로운 별 추가 (각 별에 애니메이션 적용)
+                            for (let i = 0; i < newStars.length; i++) {
+                                const starSpan = document.createElement('span');
+                                starSpan.className = 'star-pop';
+                                starSpan.textContent = newStars[i];
+                                starsElement.appendChild(starSpan);
+                            }
+                        }
+                        
+                        // 애니메이션 완료 여부 확인
+                        if (elapsed < 1) {
+                            // 애니메이션 계속
+                            requestAnimationFrame(animateScoreAndStars);
+                        }
+                    }
+                    
+                    // 애니메이션 시작
+                    requestAnimationFrame(animateScoreAndStars);
+                    
+                    // 게임 오버 컨텐츠에 애니메이션 클래스 추가
+                    const gameOverContent = document.querySelector('.game-over-content');
+                    if (gameOverContent) {
+                        gameOverContent.classList.add('animating');
+                        // 애니메이션 완료 후 클래스 제거
+                        setTimeout(() => {
+                            gameOverContent.classList.remove('animating');
+                        }, duration);
+                    }
+                }
+            }
+            
+            gameOverElement.style.display = 'flex';
+        }
+        
+        // 게임 타이머 및 힌트 타이머 정리
+        gameTimer.reset();
+        hintWaitTimer.reset();
+        hintDisplayTimer.reset();
+        
+        // 선택 영역 초기화
+        clearSelection();
+        
+        // 진행 중인 애니메이션 중지
+        activeAnimations.forEach(id => {
+            cancelAnimationFrame(id);
+        });
+        activeAnimations = [];
+    } else {
+        // 일반 게임 종료 처리
+        endGame(message);
+    }
 }
