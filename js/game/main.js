@@ -220,7 +220,26 @@ function initGame(seed) {
     isHintVisible = false;
     gameStateChanged = true;
     timeLeft = TIME_LIMIT; // 게임 시간 초기화
+    score = 0;
     isPaused = false;
+    
+    // 선택 상태 변수 초기화
+    isSelecting = false;
+    selectionStartCell = null;
+    selectionEndCell = null;
+    selectedCells = [];
+    
+    // 모든 셀에서 선택 클래스 제거 (추가 안전장치)
+    document.querySelectorAll('.cell.selected').forEach(cell => {
+        cell.classList.remove('selected');
+    });
+    
+    // falling 클래스를 가진 모든 요소 제거 (애니메이션 도중 남은 요소들)
+    document.querySelectorAll('.cell.falling').forEach(cell => {
+        if (cell.parentNode) {
+            cell.parentNode.removeChild(cell);
+        }
+    });
     
     // 누적 합 테이블 초기화
     prefixSumTable = null;
@@ -237,8 +256,7 @@ function initGame(seed) {
     
     // DOM 요소 초기화
     document.getElementById('game-over').style.display = 'none';
-    document.getElementById('sum').textContent = '0';
-    document.getElementById('time').textContent = (timeLeft).toFixed(1);
+    updateUI();
     document.getElementById('time').classList.remove('time-warning', 'time-blink-10', 'time-blink-5', 'time-blink-1');
     
     // 게임 그리드에서 일시정지 효과 제거
@@ -531,6 +549,18 @@ function renderGrid() {
 function startSelection(e) {
     if (isPaused || timeLeft <= 0) return; // 일시 정지 상태이거나 게임이 종료된 경우 무시
     
+    // 셀 좌표 계산
+    const coordinates = getCellCoordinatesFromPosition(e.clientX, e.clientY);
+    
+    // 유효한 셀인지 확인 (빈 셀이 아니고 유효한 범위 내에 있는지)
+    if (coordinates.row < 0 || coordinates.row >= ROWS || 
+        coordinates.col < 0 || coordinates.col >= COLS ||
+        !grid[coordinates.row] || 
+        !grid[coordinates.row][coordinates.col] ||
+        grid[coordinates.row][coordinates.col].value <= 0) {
+        return; // 유효하지 않은 셀이면 선택 시작하지 않음
+    }
+    
     isSelecting = true;
     
     // 포인터 캡처 설정 (드래그 추적 개선) - 터치 입력에만 적용
@@ -542,13 +572,10 @@ function startSelection(e) {
         }
     }
     
-    // 셀 좌표 계산
-    const targetElement = e.target;
-    
     // 터치 입력 또는 셀 요소가 아닌 경우 좌표 계산으로 찾기
-    if (e.pointerType === POINTER_TYPE_TOUCH || !targetElement.classList.contains('cell')) {
+    if (e.pointerType === POINTER_TYPE_TOUCH || !e.target.classList.contains('cell')) {
         // 위치로부터 셀 좌표 계산
-        selectionStartCell = getCellCoordinatesFromPosition(e.clientX, e.clientY);
+        selectionStartCell = coordinates;
         
         // 셀 요소 직접 찾기 (특히 모바일 터치에서 중요)
         const elementAtPoint = document.elementFromPoint(e.clientX, e.clientY);
@@ -561,13 +588,16 @@ function startSelection(e) {
     } else {
         // 일반적인 마우스 클릭 - 타겟 요소 사용
         selectionStartCell = {
-        row: parseInt(targetElement.dataset.row, 10),
-        col: parseInt(targetElement.dataset.col, 10)
+            row: parseInt(e.target.dataset.row, 10),
+            col: parseInt(e.target.dataset.col, 10)
         };
     }
     
-    clearSelection();
-    selectCellsInRange(selectionStartCell, selectionStartCell);
+    // 처음 선택 시 selectionEndCell 초기화 (선택 영역의 일관성 유지)
+    selectionEndCell = selectionStartCell;
+    
+    // 선택 영역 업데이트
+    selectCellsInRange(selectionStartCell, selectionEndCell);
 }
 
 // 마우스/터치 위치로부터 셀 좌표 계산
@@ -626,6 +656,12 @@ function getCellCoordinatesFromPosition(x, y) {
 function updateSelection(e) {
     if (isPaused || !isSelecting || timeLeft <= 0) return; // 일시 정지 상태이거나 선택 중이 아닌 경우 무시
     
+    // selectionStartCell이 null이면 선택을 시작할 수 없음
+    if (!selectionStartCell) {
+        isSelecting = false;
+        return;
+    }
+    
     // 셀 좌표 계산 (효율적인 방식)
     const currentCell = getCellCoordinatesFromPosition(e.clientX, e.clientY);
     
@@ -633,13 +669,12 @@ function updateSelection(e) {
     const validRow = Math.max(0, Math.min(currentCell.row, ROWS - 1));
     const validCol = Math.max(0, Math.min(currentCell.col, COLS - 1));
     
-    // 보정된 좌표로 셀 업데이트
     const validCell = {
         row: validRow,
         col: validCol
     };
     
-    // 셀 위치가 변경된 경우만 업데이트 - 불필요한 DOM 업데이트 방지
+    // 보정된 좌표로 셀 업데이트
     if (!selectionEndCell || 
         validCell.row !== selectionEndCell.row || 
         validCell.col !== selectionEndCell.col) {
@@ -667,6 +702,12 @@ function endSelection(e) {
         } catch (error) {
             console.warn('포인터 캡처 해제 실패:', error);
         }
+    }
+    
+    // 선택 셀 유효성 검사
+    if (!selectionStartCell || !selectionEndCell) {
+        clearSelection();
+        return;
     }
     
     // 선택된 셀이 없으면 종료
@@ -755,13 +796,25 @@ function endSelection(e) {
 
 // 범위 내의 셀 선택 (같은 색상만 허용)
 function selectCellsInRange(startCell, endCell) {
+    // startCell 또는 endCell이 null이면 선택 취소
+    if (!startCell || !endCell) {
+        clearSelection();
+        return;
+    }
+    
     // 범위 계산
     const minRow = Math.min(startCell.row, endCell.row);
     const maxRow = Math.max(startCell.row, endCell.row);
     const minCol = Math.min(startCell.col, endCell.col);
     const maxCol = Math.max(startCell.col, endCell.col);
     
-    // 시작 셀의 색상 확인
+    // 시작 셀의 색상 확인 (그리드 범위 체크 추가)
+    if (startCell.row < 0 || startCell.row >= ROWS || startCell.col < 0 || startCell.col >= COLS ||
+        !grid[startCell.row] || !grid[startCell.row][startCell.col]) {
+        clearSelection();
+        return;
+    }
+    
     const startCellColor = grid[startCell.row][startCell.col].color;
     
     // 선택 영역의 너비와 높이 계산
@@ -829,7 +882,7 @@ function selectCellsInRange(startCell, endCell) {
 // 선택 해제
 function clearSelection() {
     // 선택된 셀이 없으면 불필요한 작업 방지
-    if (selectedCells.length === 0) return;
+    if (selectedCells.length === 0 && !selectionStartCell && !selectionEndCell) return;
     
     // 선택된 모든 셀에서 선택 클래스 제거
     for (const cell of selectedCells) {
@@ -840,8 +893,10 @@ function clearSelection() {
         }
     }
     
-    // 선택된 셀 배열 초기화
+    // 모든 선택 관련 변수 초기화
     selectedCells = [];
+    selectionStartCell = null;
+    selectionEndCell = null;
     
     // UI 업데이트
     updateUI();
@@ -1210,7 +1265,33 @@ function findHints() {
 
     if (hints.length === 0) {
         console.log("힌트를 찾을 수 없습니다. 더 이상 가능한 조합이 없습니다.");
-        checkStageCompletion('가능한 조합이 없습니다.');
+        
+        // 선택 상태를 먼저 완전히 초기화
+        clearSelection();
+        
+        // 추가로 선택 상태 변수를 명시적으로 초기화
+        isSelecting = false;
+        selectionStartCell = null;
+        selectionEndCell = null;
+        selectedCells = [];
+        
+        // 모든 셀에서 선택 클래스 제거 (추가 안전장치)
+        document.querySelectorAll('.cell.selected').forEach(cell => {
+            cell.classList.remove('selected');
+        });
+        
+        // falling 클래스를 가진 모든 요소 제거 (애니메이션 도중 남은 요소들)
+        document.querySelectorAll('.cell.falling').forEach(cell => {
+            if (cell.parentNode) {
+                cell.parentNode.removeChild(cell);
+            }
+        });
+        
+        // 그 후에 게임 종료 처리
+        setTimeout(() => {
+            checkStageCompletion('가능한 조합이 없습니다.');
+        }, 10);
+        
         return;
     }
     
@@ -1448,6 +1529,24 @@ function endGame(message = '') {
     // 선택 영역 초기화
     clearSelection();
     
+    // 추가로 선택 상태 변수 초기화
+    isSelecting = false;
+    selectionStartCell = null;
+    selectionEndCell = null;
+    selectedCells = [];
+    
+    // 모든 셀에서 선택 클래스 제거 (추가 안전장치)
+    document.querySelectorAll('.cell.selected').forEach(cell => {
+        cell.classList.remove('selected');
+    });
+    
+    // falling 클래스를 가진 모든 요소 제거 (애니메이션 도중 남은 요소들)
+    document.querySelectorAll('.cell.falling').forEach(cell => {
+        if (cell.parentNode) {
+            cell.parentNode.removeChild(cell);
+        }
+    });
+    
     // 진행 중인 애니메이션 중지
     activeAnimations.forEach(id => {
         cancelAnimationFrame(id);
@@ -1548,7 +1647,6 @@ function precomputeHints() {
 
 // 스테이지 선택 다이얼로그 관련 코드
 const stageDialog = document.getElementById('stage-selection-dialog');
-const closeStageButton = document.getElementById('close-stage-selection');
 const stagesContainer = document.querySelector('.stages-container');
 const stageNumberElement = document.querySelector('#stage-number .stage-number');
 const stageTemplate = document.getElementById('stage-template');
@@ -1556,6 +1654,20 @@ const prevPageButton = document.getElementById('prev-page');
 const nextPageButton = document.getElementById('next-page');
 const pageDisplay = document.getElementById('page-display');
 const pageNumbersContainer = document.querySelector('.page-numbers');
+
+// 스테이지 다이얼로그가 열릴 때마다 최신 데이터 로드
+if (stageDialog) {
+    // showModal 메서드가 호출될 때 데이터 로드
+    const originalShowModal = stageDialog.showModal;
+    stageDialog.showModal = function() {
+        console.log('스테이지 다이얼로그 열림 - 최신 데이터 로드');
+        // 데이터 최신화
+        stageData.loadFromStorage();
+        generateStages();
+        updatePageControls();
+        return originalShowModal.apply(this, arguments);
+    };
+}
 
 // 페이지네이션 변수
 let currentPage = 1;
@@ -1566,11 +1678,18 @@ const stagesPerPage = 100;
 function showStageSelection() {
     // 데이터 업데이트를 위해 항상 최신 데이터 로드
     stageData.loadFromStorage();
+    console.log('스테이지 선택화면 표시 - 최신 데이터 로드:', stageData.completedStages, stageData.stageScores);
     
     // 페이지가 이미 초기화되었는지 확인
     if (stagesContainer.children.length === 0) {
         // 첫 로드 시 페이징 초기화
         initPagination();
+    } else {
+        // 페이지 표시를 현재 완료된 스테이지에 맞게 조정
+        const completedStageLastPage = Math.ceil(stageData.completedStages / stagesPerPage);
+        if (completedStageLastPage > 0 && currentPage > completedStageLastPage) {
+            currentPage = completedStageLastPage;
+        }
     }
     
     // 스테이지 데이터를 항상 새로 생성하여 최신 정보 반영
@@ -1643,13 +1762,6 @@ function updatePageControls() {
 }
 
 // 닫기 버튼 클릭 시 다이얼로그 닫기 및 게임 시작
-closeStageButton.addEventListener('click', () => {
-    stageDialog.close();
-    // 현재 선택된 스테이지로 게임 시작
-    initGame(generateStageSeed(currentStageNumber));
-});
-
-// 클릭 이벤트가 다이얼로그 바깥쪽에서 발생하면 닫기 및 게임 시작
 stageDialog.addEventListener('click', (e) => {
     if (e.target === stageDialog) {
         stageDialog.close();
@@ -2344,11 +2456,28 @@ function checkStageCompletion(message) {
         // 선택 영역 초기화
         clearSelection();
         
+        // 추가로 선택 상태 변수 초기화
+        isSelecting = false;
+        selectionStartCell = null;
+        selectionEndCell = null;
+        selectedCells = [];
+        
+        // 모든 셀에서 선택 클래스 제거 (추가 안전장치)
+        document.querySelectorAll('.cell.selected').forEach(cell => {
+            cell.classList.remove('selected');
+        });
+        
+        // falling 클래스를 가진 모든 요소 제거 (애니메이션 도중 남은 요소들)
+        document.querySelectorAll('.cell.falling').forEach(cell => {
+            if (cell.parentNode) {
+                cell.parentNode.removeChild(cell);
+            }
+        });
+        
         // 진행 중인 애니메이션 중지
         activeAnimations.forEach(id => {
             cancelAnimationFrame(id);
         });
-        activeAnimations = [];
     } else {
         // 일반 게임 종료 처리
         endGame(message);
