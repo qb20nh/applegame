@@ -39,3 +39,7 @@ export function diagonalStripes(row, col, ROWS, COLS) {
     const [L, S, l, s] = longShort(ROWS, COLS, row, col);
     return EVEN((l + s) / 2) || EVEN((l + s + 1) / 2);
 }
+
+export function split50(row, col, ROWS, COLS) {
+    return col < (COLS / 2);
+}

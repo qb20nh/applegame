@@ -260,10 +260,11 @@ export class Timer {
    * @returns {Function} 리스너 제거 함수
    */
   then(other) {
-    return this.onEnd(() => {
+    this.onEnd(() => {
         other.reset();
         other.start();
     });
+    return this;
   }
 }
 

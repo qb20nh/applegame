@@ -15,6 +15,23 @@
         <div class="score">📊 <span id="score">0</span></div>
     </div>
     
+    <!-- 게임 모드 선택 다이얼로그 -->
+    <dialog id="mode-selection-dialog" class="mode-dialog">
+        <div class="dialog-content">
+            <h2>게임 모드 선택</h2>
+            <div class="mode-buttons">
+                <button id="mode-stage-btn" class="mode-btn">
+                    <span class="mode-icon">🗺️</span>
+                    <span class="mode-text">스테이지 모드</span>
+                </button>
+                <button id="mode-frenzy-btn" class="mode-btn frenzy">
+                    <span class="mode-icon">🔥</span>
+                    <span class="mode-text">프렌지 모드</span>
+                </button>
+            </div>
+        </div>
+    </dialog>
+    
     <!-- 스테이지 타일 템플릿 -->
     <template id="stage-template">
         <div class="stage-item" data-stage="">
@@ -38,7 +55,8 @@
                 <div class="page-numbers">
                     <!-- 페이지 번호는 JavaScript로 동적 생성 -->
                 </div>
-                <button id="next-page" class="page-btn">&gt;</button>
+            <div class="dialog-buttons">
+                <button id="close-stage-selection" class="dialog-close-btn">닫기</button>
             </div>
         </div>
     </dialog>

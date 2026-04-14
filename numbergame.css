@@ -4,32 +4,33 @@
     --grid-cols: 20;
     --grid-gap: 1px;
     --grid-padding: 1px;
-    
+
     /* 색상 변수 */
     --color-background: #f8f8f8;
     --color-title: #d62828;
     --color-grid-bg: #333;
-    
+
     /* 주황색 계열 */
     --color-orange: #ff9500;
     --color-orange-selected: #ff7b00;
     --color-orange-pulse: #ffb650;
-    
+
     /* 파란색 계열 */
-    --color-blue: #00b1e7;
-    --color-blue-selected: #0093c9;
-    --color-blue-pulse: #2fceff;
-    
+    --color-blue: #0088cc;
+    --color-blue-selected: #006da3;
+    --color-blue-pulse: #2eafff;
+
     /* 기타 UI 색상 */
     --color-selection-info: #ffb703;
     --color-timer-bg: #ffc8dd;
-    --color-border: #d62828;
-    --color-border-blue: #5b42e5; /* 파란색 선택을 위한 테두리 색상 */
+    --color-border: #c9340f;
+    --color-border-blue: #5019b4c9;
+    /* 파란색 선택을 위한 테두리 색상 */
     --color-button: #d62828;
     --color-button-hover: #b21e1e;
-    --color-shadow: rgba(0,0,0,0.1);
-    --color-shadow-deep: rgba(0,0,0,0.2);
-    --color-shadow-overlay: rgba(0,0,0,0.8);
+    --color-shadow: rgba(0, 0, 0, 0.1);
+    --color-shadow-deep: rgba(0, 0, 0, 0.2);
+    --color-shadow-overlay: rgba(0, 0, 0, 0.8);
 }
 
 body {
@@ -57,7 +58,9 @@ h1 {
     margin-bottom: 15px;
 }
 
-.timer, .score, .selection-info {
+.timer,
+.score,
+.selection-info {
     font-size: 20px;
     font-weight: bold;
     background-color: var(--color-timer-bg);
@@ -83,9 +86,12 @@ h1 {
     background-color: var(--color-grid-bg);
     border-radius: 5px;
     box-shadow: 0 5px 15px var(--color-shadow-deep);
-    position: relative; /* 애니메이션을 위해 position 설정 */
-    margin: 0 auto; /* 수평 중앙 정렬 */
-    place-items: center; /* 그리드 아이템을 중앙에 배치 */
+    position: relative;
+    /* 애니메이션을 위해 position 설정 */
+    margin: 0 auto;
+    /* 수평 중앙 정렬 */
+    place-items: center;
+    /* 그리드 아이템을 중앙에 배치 */
     max-width: 100%;
     overflow-x: auto;
 }
@@ -100,13 +106,18 @@ h1 {
     cursor: pointer;
     border-radius: 3px;
     transition: background-color 0.2s, box-shadow 0.2s;
-    user-select: none; /* 텍스트 선택 비활성화 */
+    user-select: none;
+    /* 텍스트 선택 비활성화 */
     width: var(--cell-size);
     height: var(--cell-size);
-    box-sizing: border-box; /* 패딩과 테두리를 포함한 크기 계산 */
-    margin: 0; /* 여백 제거 */
-    padding: 0; /* 내부 여백 제거 */
-    overflow: hidden; /* 내용이 넘치는 경우 숨김 */
+    box-sizing: border-box;
+    /* 패딩과 테두리를 포함한 크기 계산 */
+    margin: 0;
+    /* 여백 제거 */
+    padding: 0;
+    /* 내부 여백 제거 */
+    overflow: hidden;
+    /* 내용이 넘치는 경우 숨김 */
 }
 
 @media (hover: hover) {
@@ -159,15 +170,31 @@ h1 {
 }
 
 @keyframes orangeHintPulse {
-    0% { background-color: var(--color-orange); }
-    50% { background-color: var(--color-orange-pulse); }
-    100% { background-color: var(--color-orange); }
+    0% {
+        background-color: var(--color-orange);
+    }
+
+    50% {
+        background-color: var(--color-orange-pulse);
+    }
+
+    100% {
+        background-color: var(--color-orange);
+    }
 }
 
 @keyframes blueHintPulse {
-    0% { background-color: var(--color-blue); }
-    50% { background-color: var(--color-blue-pulse); }
-    100% { background-color: var(--color-blue); }
+    0% {
+        background-color: var(--color-blue);
+    }
+
+    50% {
+        background-color: var(--color-blue-pulse);
+    }
+
+    100% {
+        background-color: var(--color-blue);
+    }
 }
 
 .cell.falling {
@@ -184,7 +211,7 @@ h1 {
 
 .cell.falling.blue-layer {
     background-color: var(--color-blue);
-    box-shadow: inset 0 0 0 3px var(--color-blue-pulse);
+    box-shadow: inset 0 0 0 3px var(--color-border-blue);
 }
 
 /* 게임 오버 화면 스타일 */
@@ -266,9 +293,17 @@ h1 {
 }
 
 @keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.03); }
-    100% { transform: scale(1); }
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.03);
+    }
+
+    100% {
+        transform: scale(1);
+    }
 }
 
 /* 게임 버튼 컨테이너 */
@@ -280,7 +315,9 @@ h1 {
 }
 
 /* 버튼 공통 스타일 */
-.restart-btn, .next-stage-btn, .stage-select-btn {
+.restart-btn,
+.next-stage-btn,
+.stage-select-btn {
     margin-top: 20px;
     padding: 12px 25px;
     font-size: 18px;
@@ -293,13 +330,17 @@ h1 {
     font-weight: bold;
 }
 
-.restart-btn:hover, .next-stage-btn:hover, .stage-select-btn:hover {
+.restart-btn:hover,
+.next-stage-btn:hover,
+.stage-select-btn:hover {
     background-color: var(--color-button-hover);
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 
-.restart-btn:active, .next-stage-btn:active, .stage-select-btn:active {
+.restart-btn:active,
+.next-stage-btn:active,
+.stage-select-btn:active {
     transform: translateY(0);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
@@ -319,22 +360,22 @@ h1 {
     body {
         padding: 10px;
     }
-    
+
     .game-info {
         gap: 10px;
     }
-    
+
     .selection-info {
         margin: 10px 0;
     }
-    
+
     h1 {
         font-size: 24px;
     }
-    
+
 }
 
-.game-info > div {
+.game-info>div {
     word-break: keep-all;
     white-space: nowrap;
 }
@@ -483,13 +524,13 @@ h1 {
         font-size: 18px;
         margin-bottom: 15px;
     }
-    
+
     /* 페이지네이션 모바일 대응 */
     .pagination {
         margin: 10px 0;
         gap: 4px;
     }
-    
+
     .page-numbers {
         gap: 3px;
         margin: 0 4px;
@@ -498,13 +539,13 @@ h1 {
         justify-content: center;
         max-width: 180px;
     }
-    
+
     .page-number {
         width: 22px;
         height: 22px;
         font-size: 10px;
     }
-    
+
     .page-btn {
         width: 25px;
         height: 25px;
@@ -763,7 +804,7 @@ h1 {
         bottom: 15px;
         right: 15px;
     }
-    
+
     .pause-dialog .dialog-content,
     .confirmation-dialog .dialog-content {
         padding: 15px;
@@ -817,15 +858,31 @@ h1 {
 }
 
 @keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-    100% { transform: scale(1); }
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.1);
+    }
+
+    100% {
+        transform: scale(1);
+    }
 }
 
 @keyframes blink {
-    0% { opacity: 1; }
-    50% { opacity: 0; }
-    100% { opacity: 1; }
+    0% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0;
+    }
+
+    100% {
+        opacity: 1;
+    }
 }
 
 /* 별 애니메이션 효과 */
@@ -833,9 +890,11 @@ h1 {
     0% {
         transform: scale(1);
     }
+
     50% {
         transform: scale(1.5);
     }
+
     100% {
         transform: scale(1);
     }

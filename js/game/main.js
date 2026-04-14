@@ -1,2485 +1,552 @@
-import { Timer, TimerState, TimerAction } from '../utils/timer.js';
-import { FSM } from '../utils/fsm.js';
+import { Timer } from '../utils/timer.js';
 import { isLocalhost } from '../utils/util.js';
-import { SeededRandom, pseudoPermutation } from '../utils/random.js';
+import { ROWS, COLS, TARGET_SUM, TIME_LIMIT, COLORS, POINTER_TYPE_TOUCH, STAR_THRESHOLDS } from './constants.js';
+import { state, gameState, generateStageSeed } from './state.js';
+import { ui } from './ui.js';
+import { getCellCoordinatesFromPosition, selectCellsInRange, clearSelection } from './input.js';
+import { startPhysicsAnimation, explodeCellsGrid } from './animations.js';
 
 const noop = () => {};
 const IS_LOCALHOST = isLocalhost();
-const injectGlobal = IS_LOCALHOST ? (func, name = func.name) => {
-    globalThis[name] = func;
-} : noop;
-injectGlobal(injectGlobal);
 
-const gameState = FSM.simple({
-    'loading': {
-        'load': 'stage_select'
-    },
-    'stage_select': {
-        'select': 'playing'
-    },
-    'playing': {
-        'pause': 'paused',
-        'game_over': 'game_result',
-        'clear': 'clear_result'
-    },
-    'paused': {
-        'resume': 'playing',
-        'give_up': 'stage_select',
-        'restart': 'playing'
-    },
-    'game_result': {
-        'restart': 'playing',
-        'next': 'playing',
-        'go_back': 'stage_select'
-    },
-    'clear_result': {
-        'restart': 'playing',
-        'go_back': 'stage_select'
-    }
-});
+// Web Worker 초기화
+const gameWorker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
-// 시드 기반 난수 생성 관련 변수 및 함수
-let currentSeed = 12345;
-let randomGenerator = null;
-
-// 시드 설정 함수
-function setSeed(seed) {
-    currentSeed = seed;
-    randomGenerator = new SeededRandom(seed);
-    console.log(`시드 설정: ${seed}`);
+// 전역 인터페이스 제공 (레거시 지원 및 디버깅)
+if (IS_LOCALHOST) {
+    globalThis.gameWorker = gameWorker;
 }
 
-// 랜덤 생성기 가져오기
-function getRandom() {
-    if (!randomGenerator) {
-        setSeed(currentSeed);
-    }
-    return randomGenerator;
-}
-
-// 스테이지 번호를 기반으로 시드 생성
-function generateStageSeed(stageNumber) {
-    // 기본 시드에 스테이지 번호를 결합하여 고유한 시드 생성
-    return 1000000 + stageNumber * 1000 + 123;
-}
-
-// 현재 스테이지 번호 변수 추가 (기본값: 1)
-let currentStageNumber = 1;
-
-// 초기 시드 설정 - 스테이지 1 기준으로 설정
-setSeed(generateStageSeed(currentStageNumber));
-
-Object.entries(console).forEach(([name, value]) => {
-    if (typeof value !== 'function') {
-        return;
-    }
-        const wrappedFunction = new Proxy(value, {
-            apply(target, thisArg, argumentsList) {
-                const fn = IS_LOCALHOST ? target : noop;
-                return Reflect.apply(fn, thisArg, argumentsList);
-            }
-        })
-    console[`${name}_`] = value;
-        console[name] = wrappedFunction;
-})
-
-// 게임 변수 초기화
-let aspect = screen.availWidth / screen.availHeight;
-const ROWS = 5;
-const COLS = 10;
-const TARGET_SUM = 10;
-const TIME_LIMIT = 100;
-const CELL_SIZE = 36; // 셀 크기(픽셀)
-const GRID_GAP = 4;   // 그리드 셀 간격(픽셀)
-const GRID_PADDING = 4; // 그리드 패딩(픽셀)
-let HINT_DELAY = 5000; // 힌트가 표시되기까지의 시간(ms)
-let HINT_DURATION = 3000; // 힌트 표시 지속 시간(ms)
-const POINTER_TYPE_TOUCH = 'touch'; // 포인터 타입: 터치
-
-let grid = [];
-let selectedCells = [];
-let score = 0;
-let timeLeft = TIME_LIMIT;
+// 타이머 객체 (가변형으로 변경)
+let gameTimer;
 let timerUIUpdateInterval;
-let gameTimer = new Timer(() => {
+
+function initTimers(limit) {
+    if (gameTimer) gameTimer.reset();
     clearInterval(timerUIUpdateInterval);
-    // 숫자 폭발 애니메이션 후 그리드 셀 폭발 애니메이션, 그 후 게임 오버
-    explodeTimerDisplay(() => {
-        explodeCellsGrid(() => {
-            // 시간 초과 처리 함수 호출
-            checkStageCompletion('시간 초과!');
-        });
-    });
-}, TIME_LIMIT * 1000);
-injectGlobal(gameTimer, 'gameTimer');
-gameTimer.onStart(() => {
-    console.log('gameTimer onStart');
-    timerUIUpdateInterval = setInterval(updateTimerUI, 100);
-})
-gameTimer.onResume(() => {
-    console.log('gameTimer onResume');
-    timerUIUpdateInterval = setInterval(updateTimerUI, 100);
-})
-gameTimer.onPause(() => {
-    console.log('gameTimer onPause');
-    clearInterval(timerUIUpdateInterval);
-})
-gameTimer.onReset(() => {
-    console.log('gameTimer onReset');
-    clearInterval(timerUIUpdateInterval);
-})
-
-let isSelecting = false;
-let selectionStartCell = null;
-let selectionEndCell = null;  // 선택 종료 셀 추가
-let emptyCellCount = 0;
-let currentSelection = [];
-let lastClearTime;
-let selectedSum = 0;
-let currentSelectionSize = null;
-let hintWaitTimer = new Timer(showHint, HINT_DELAY); // 힌트 대기 타이머
-let hintDisplayTimer = new Timer(hideHint, HINT_DURATION); // 힌트 표시 타이머
-hintWaitTimer.then(hintDisplayTimer);
-hintDisplayTimer.then(hintWaitTimer);
-
-hintWaitTimer.onStart(() => {
-    console.log('hintWaitTimer start');
-})
-hintDisplayTimer.onStart(() => {
-    console.log('hintDisplayTimer start');
-})
-hintWaitTimer.onResume(() => {
-    console.log('hintWaitTimer resume');
-})
-hintDisplayTimer.onResume(() => {
-    console.log('hintDisplayTimer resume');
-})
-hintWaitTimer.onPause(() => {
-    console.log('hintWaitTimer pause');
-})
-hintDisplayTimer.onPause(() => {
-    console.log('hintDisplayTimer pause');
-})
-
-
-
-let currentHint = null; // 현재 표시 중인 힌트
-let isHintVisible = false; // 힌트 표시 상태
-let lastVisibleHint = null; // 가장 최근에 표시된 힌트 저장
-let secondLastVisibleHint = null; // 두 번째로 최근에 표시된 힌트 저장
-
-// 추가: 힌트 캐싱을 위한 변수들
-let cachedHints = null; // 캐시된 힌트 목록
-let gameStateChanged = true; // 게임 상태 변경 여부
-let lastShownHintIndex = -1; // 마지막으로 표시된 힌트의 인덱스
-
-// 레이어 시스템을 위한 변수
-const COLORS = ['orange', 'blue']; // 색상 순환 배열
-
-// 누적 합 테이블을 전역 변수로 저장 (그리드 상태 변화에 따라 점진적으로 업데이트)
-let prefixSumTable = null;
-// 색상별 누적 합 테이블 (주황색/파란색 각각)
-let orangePrefixSumTable = null;
-let bluePrefixSumTable = null;
-
-// DOM 요소
-let gameGridElement = document.getElementById('game-grid');
-let timeElement = document.getElementById('time');
-let scoreElement = document.getElementById('score');
-let sumElement = document.getElementById('sum');
-let gameOverElement = document.getElementById('game-over');
-let restartBtn = document.getElementById('restart-btn');
-let stageClearInfoElement = document.getElementById('stage-clear-info');
-let stageStarsElement = document.getElementById('stage-stars');
-let nextStageBtn = document.getElementById('next-stage-btn');
-let stageSelectBtn = document.getElementById('stage-select-btn');
-
-// 캐시된 DOM 요소들 - 성능 최적화를 위해 사용
-let cellElements = {}; // 셀 요소 캐시 저장소
-
-// 그리드 CSS 설정 함수
-function setGridCSS() {
-    // CSS 변수를 문서의 루트 요소에 설정
-    document.documentElement.style.setProperty('--grid-rows', ROWS);
-    document.documentElement.style.setProperty('--grid-cols', COLS);
-    document.documentElement.style.setProperty('--cell-size', `${CELL_SIZE}px`);
-    document.documentElement.style.setProperty('--grid-gap', `${GRID_GAP}px`);
-    document.documentElement.style.setProperty('--grid-padding', `${GRID_PADDING}px`);
-}
-
-// 게임 초기화
-function initGame(seed) {
-    // 그리드와 게임 상태 초기화
-    grid = [];
-    currentSelection = [];
-    selectedSum = 0;
-    lastShownHintIndex = -1;
-    currentHint = null;
-    lastVisibleHint = null;
-    secondLastVisibleHint = null;
-    isHintVisible = false;
-    gameStateChanged = true;
-    timeLeft = TIME_LIMIT; // 게임 시간 초기화
-    score = 0;
-    isPaused = false;
     
-    // 선택 상태 변수 초기화
-    isSelecting = false;
-    selectionStartCell = null;
-    selectionEndCell = null;
-    selectedCells = [];
-    
-    // 모든 셀에서 선택 클래스 제거 (추가 안전장치)
-    document.querySelectorAll('.cell.selected').forEach(cell => {
-        cell.classList.remove('selected');
-    });
-    
-    // falling 클래스를 가진 모든 요소 제거 (애니메이션 도중 남은 요소들)
-    document.querySelectorAll('.cell.falling').forEach(cell => {
-        if (cell.parentNode) {
-            cell.parentNode.removeChild(cell);
-        }
-    });
-    
-    // 누적 합 테이블 초기화
-    prefixSumTable = null;
-    orangePrefixSumTable = null;
-    bluePrefixSumTable = null;
-    cachedHints = null;
-    
-    // 게임 타이머 초기화 (Timer 클래스 사용)
-    gameTimer.reset();
-    
-    // 힌트 타이머 초기
-    hintWaitTimer.reset();
-    hintDisplayTimer.reset();
-    
-    // DOM 요소 초기화
-    document.getElementById('game-over').style.display = 'none';
-    updateUI();
-    document.getElementById('time').classList.remove('time-warning', 'time-blink-10', 'time-blink-5', 'time-blink-1');
-    
-    // 게임 그리드에서 일시정지 효과 제거
-    if (gameGridElement) {
-        gameGridElement.classList.remove('paused');
-    }
-    
-    
-    // 랜덤 시드 설정
-    setSeed(seed);
-    
-    // 그리드 생성 및 초기화
-    initGrid();
-
-    setGridCSS();
-    
-    // 그리드 렌더링
-    renderGrid();
-    
-    // 타이머 시작
-    gameTimer.start();
-    // 힌트 대기 타이머 시작
-    hintWaitTimer.start();
-    
-    // 누적 합 테이블 다시 계산 (스테이지 변경 시 필요)
-    buildAllPrefixSums();
-    
-    // 최초 힌트 캐시 계산
-    precomputeHints();
-}
-
-import * as patterns from './patterns.js';
-
-function getColor(stage, row, col, ROWS, COLS) {
-    const patternGenerators = [
-        patterns.halfSquare,
-        patterns.halfStripes,
-        patterns.verticalStripes,
-        patterns.donuts,
-        patterns.checker,
-        patterns.diagonalStripes
-    ]
-    const patternGenerator = patternGenerators[(stage - 1) % patternGenerators.length];
-    return patternGenerator(row, col, ROWS, COLS);
-}
-
-function initGrid() {
-    grid = [];
-    for (let i = 0; i < ROWS; i++) {
-        const row = [];
-        for (let j = 0; j < COLS; j++) {
-            // 각 셀에 값, 레이어 깊이, 색상 정보 추가
-            // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색으로 시작
-            const isBlue = getColor(currentStageNumber, i, j, ROWS, COLS); // 오른쪽 절반 여부 확인
-            
-            row.push({
-                value: getRandom().nextInt(1, 9), // 시드 기반 난수 생성
-                layerDepth: isBlue ? 1 : 0, // 초기 레이어 깊이
-                color: isBlue ? COLORS[1] : COLORS[0] // 오른쪽 절반은 파란색, 왼쪽 절반은 주황색
+    gameTimer = new Timer(() => {
+        clearInterval(timerUIUpdateInterval);
+        explodeTimerDisplay(() => {
+            explodeCellsGrid([...ui.gameGridElement.querySelectorAll('.cell:not(.empty)')], () => {
+                checkStageCompletion('시간 초과!');
             });
-        }
-        grid.push(row);
-    }
-}
-
-// DOM 초기화 및 게임 오버 화면 생성
-function initDom() {
-    // 게임 그리드 요소 참조
-    gameGridElement = document.getElementById('game-grid');
-    
-    // 게임 정보 UI 요소
-    timeElement = document.getElementById('time');
-    scoreElement = document.getElementById('score');
-    sumElement = document.getElementById('sum');
-    
-    // 게임 오버 화면 요소
-    gameOverElement = document.getElementById('game-over');
-    stageClearInfoElement = document.getElementById('stage-clear-info');
-    stageStarsElement = document.getElementById('stage-stars');
-    
-    // 버튼 요소
-    restartBtn = document.getElementById('restart-btn');
-    nextStageBtn = document.getElementById('next-stage-btn');
-    stageSelectBtn = document.getElementById('stage-select-btn');
-    
-    // 일시 정지 관련 요소
-    pauseBtn = document.getElementById('pause-btn');
-    pauseMenuDialog = document.getElementById('pause-menu-dialog');
-    confirmationDialog = document.getElementById('confirmation-dialog');
-    
-    // 화면 방향 변경 감지 리스너 (resize 이벤트 사용)
-    window.addEventListener('resize', () => {
-        // 이전 방향 저장
-        const prevAspect = aspect;
-        const wasVertical = prevAspect < 1;
-        
-        // 현재 화면 비율 계산
-        aspect = window.innerWidth / window.innerHeight;
-        const isVertical = aspect < 1;
-        
-        // 화면 방향이 변경된 경우에만 그리드 다시 렌더링
-        if (wasVertical !== isVertical) {
-            console.log('화면 방향 변경 감지: ' + (isVertical ? '세로' : '가로') + ' 모드로 전환');
-            // 그리드 다시 렌더링
-            renderGrid();
-        }
-    });
-    
-    // 일시 정지 버튼 클릭 이벤트
-    pauseBtn.addEventListener('click', () => {
-        // 다이얼로그를 먼저 표시한 후 게임 일시 정지
-        pauseMenuDialog.showModal();
-        pauseGame();
-    });
-    
-    // 일시 정지 메뉴 버튼 이벤트 설정
-    document.getElementById('continue-btn').addEventListener('click', () => {
-        // 게임 계속하기
-        pauseMenuDialog.close();
-        resumeGame();
-    });
-    
-    document.getElementById('restart-from-pause-btn').addEventListener('click', () => {
-        // 다시 시작하기 확인
-        pauseMenuDialog.close();
-        pendingAction = 'restart';
-        showConfirmation('다시 시작하기', '현재 진행 중인 게임을 초기화하고 처음부터 다시 시작하시겠습니까?');
-    });
-    
-    document.getElementById('give-up-btn').addEventListener('click', () => {
-        // 포기하기 확인
-        pauseMenuDialog.close();
-        pendingAction = 'giveup';
-        showConfirmation('포기하기', '현재 진행 중인 게임을 포기하고 스테이지 선택 화면으로 돌아가시겠습니까?');
-    });
-    
-    // 확인 다이얼로그 버튼 이벤트 설정
-    document.getElementById('confirm-yes-btn').addEventListener('click', () => {
-        confirmationDialog.close();
-        
-        if (pendingAction === 'restart') {
-            // 현재 스테이지 재시작
-            isPaused = false;
-            initGame(generateStageSeed(currentStageNumber));
-        } else if (pendingAction === 'giveup') {
-            // 스테이지 선택 화면으로 돌아가기
-            isPaused = false;
-            if (stageDialog) {
-                stageDialog.showModal();
-            }
-        }
-        
-        pendingAction = null;
-    });
-    
-    document.getElementById('confirm-no-btn').addEventListener('click', () => {
-        confirmationDialog.close();
-        // 일시 정지 메뉴로 돌아가기
-        pauseMenuDialog.showModal();
-        pendingAction = null;
-    });
-    
-    // 이벤트 리스너 설정 - 현재 스테이지 번호로 게임 재시작
-    restartBtn.addEventListener('click', () => {
-        // 현재 스테이지 시드로 게임 재시작
-        gameOverElement.style.display = 'none';
-        initGame(generateStageSeed(currentStageNumber));
-    });
-    
-    // 다음 스테이지 버튼 클릭 시
-    nextStageBtn.addEventListener('click', () => {
-        // 다음 스테이지로 이동 (데이터 업데이트 포함)
-        currentStageNumber++;
-        stageNumberElement.textContent = currentStageNumber;
-        
-        // 게임 오버 화면 숨기기
-        gameOverElement.style.display = 'none';
-        
-        // 힌트 관련 변수 명시적 초기화
-        prefixSumTable = null;
-        orangePrefixSumTable = null;
-        bluePrefixSumTable = null;
-        cachedHints = null;
-        gameStateChanged = true;
-        
-        // 새 스테이지로 게임 초기화
-        initGame(generateStageSeed(currentStageNumber));
-    });
-    
-    // 스테이지 선택 버튼 클릭 시
-    stageSelectBtn.addEventListener('click', () => {
-        // 게임 오버 화면 숨기기
-        gameOverElement.style.display = 'none';
-        
-        // 스테이지 선택 다이얼로그 표시
-        showStageSelection();
-    });
-    
-    // 그리드 이벤트 리스너 설정 - 포인터 이벤트와 터치 이벤트 모두 추가
-    gameGridElement.addEventListener('pointerdown', startSelection);
-    // 이벤트를 document에 등록하여 보드 밖에서도 이동 감지
-    document.addEventListener('pointermove', updateSelection);
-    document.addEventListener('pointerup', endSelection);
-    document.addEventListener('pointercancel', endSelection);
-    
-    // 모바일 터치 전용 이벤트 추가
-    gameGridElement.addEventListener('touchstart', handleTouchStart, { passive: false });
-    document.addEventListener('touchmove', handleTouchMove, { passive: false }); // document 레벨에서 이벤트 캡처
-    document.addEventListener('touchend', handleTouchEnd, { passive: false }); // document 레벨에서 이벤트 캡처
-    document.addEventListener('touchcancel', handleTouchEnd, { passive: false }); // document 레벨에서 이벤트 캡처
-}
-
-// 페이지 로드 완료 후 실행
-document.addEventListener('DOMContentLoaded', () => {
-    // DOM 요소 초기화
-    initDom();
-    
-    // 스테이지 선택 다이얼로그 표시 (게임을 바로 시작하지 않음)
-    if (stageDialog) {
-        // 스테이지 선택 화면 준비
-        if (stagesContainer.children.length === 0) {
-            initPagination();
-            generateStages();
-        }
-        // 스테이지 선택 다이얼로그 표시
-        stageDialog.showModal();
-    } else {
-        console.error('스테이지 선택 다이얼로그를 찾을 수 없습니다.');
-        // 오류 시 기본 스테이지(1)로 게임 시작
-        initGame(generateStageSeed(currentStageNumber));
-    }
-});
-
-// 그리드 렌더링
-function renderGrid() {
-    gameGridElement.innerHTML = '';
-    
-    // DOM 요소 캐시 초기화
-    cellElements = {};
-    
-    // 화면이 세로 모드인지 확인 (aspect < 1일 경우 세로 모드)
-    const isVertical = aspect < 1;
-    
-    // 세로 모드일 때 행/열 교체하여 렌더링
-    const displayRows = isVertical ? COLS : ROWS;
-    const displayCols = isVertical ? ROWS : COLS;
-    
-    // 그리드 컨테이너 스타일 설정
-    gameGridElement.style.gridTemplateRows = `repeat(${displayRows}, ${CELL_SIZE}px)`;
-    gameGridElement.style.gridTemplateColumns = `repeat(${displayCols}, ${CELL_SIZE}px)`;
-    
-    // 세로 또는 가로 모드에 따라 그리드 렌더링
-    for (let i = 0; i < displayRows; i++) {
-        for (let j = 0; j < displayCols; j++) {
-            // 원본 그리드 좌표 계산
-            const originalRow = isVertical ? (ROWS - 1 - j) : i; // -90도 회전을 위해 행 인덱스 반전
-            const originalCol = isVertical ? i : j; // -90도 회전 좌표 변환
-            
-            const cell = grid[originalRow][originalCol];
-            const cellElement = document.createElement('div');
-            cellElement.className = 'cell';
-            
-            // 원본 좌표 저장 (이벤트 핸들링 등에 사용)
-            cellElement.dataset.row = originalRow;
-            cellElement.dataset.col = originalCol;
-            
-            // 셀 요소 캐싱 (성능 최적화)
-            const cellId = `${originalRow}-${originalCol}`;
-            cellElements[cellId] = cellElement;
-            
-            if (cell && cell.value > 0) {
-                cellElement.textContent = cell.value;
-                
-                // 레이어 색상 클래스 추가 
-                cellElement.classList.add(`${cell.color}-layer`);
-                
-                // 개별 셀에 이벤트 리스너 추가하지 않음
-                // (그리드 레벨 포인터 이벤트만 사용)
-            } else {
-                cellElement.classList.add('empty');
-                emptyCellCount++; // 비어있는 셀 카운트 증가
-            }
-            
-            gameGridElement.appendChild(cellElement);
-        }
-    }
-}
-
-// 선택 시작
-function startSelection(e) {
-    if (isPaused || timeLeft <= 0) return; // 일시 정지 상태이거나 게임이 종료된 경우 무시
-    
-    // 셀 좌표 계산
-    const coordinates = getCellCoordinatesFromPosition(e.clientX, e.clientY);
-    
-    // 유효한 셀인지 확인 (빈 셀이 아니고 유효한 범위 내에 있는지)
-    if (coordinates.row < 0 || coordinates.row >= ROWS || 
-        coordinates.col < 0 || coordinates.col >= COLS ||
-        !grid[coordinates.row] || 
-        !grid[coordinates.row][coordinates.col] ||
-        grid[coordinates.row][coordinates.col].value <= 0) {
-        return; // 유효하지 않은 셀이면 선택 시작하지 않음
-    }
-    
-    isSelecting = true;
-    
-    // 포인터 캡처 설정 (드래그 추적 개선) - 터치 입력에만 적용
-    if (e.pointerType === POINTER_TYPE_TOUCH && e.target.hasPointerCapture && e.pointerId) {
-        try {
-            e.target.setPointerCapture(e.pointerId);
-        } catch (error) {
-            console.warn('포인터 캡처 설정 실패:', error);
-        }
-    }
-    
-    // 터치 입력 또는 셀 요소가 아닌 경우 좌표 계산으로 찾기
-    if (e.pointerType === POINTER_TYPE_TOUCH || !e.target.classList.contains('cell')) {
-        // 위치로부터 셀 좌표 계산
-        selectionStartCell = coordinates;
-        
-        // 셀 요소 직접 찾기 (특히 모바일 터치에서 중요)
-        const elementAtPoint = document.elementFromPoint(e.clientX, e.clientY);
-        if (elementAtPoint && elementAtPoint.classList.contains('cell')) {
-            selectionStartCell = {
-                row: parseInt(elementAtPoint.dataset.row, 10),
-                col: parseInt(elementAtPoint.dataset.col, 10)
-            };
-        }
-    } else {
-        // 일반적인 마우스 클릭 - 타겟 요소 사용
-        selectionStartCell = {
-            row: parseInt(e.target.dataset.row, 10),
-            col: parseInt(e.target.dataset.col, 10)
-        };
-    }
-    
-    // 처음 선택 시 selectionEndCell 초기화 (선택 영역의 일관성 유지)
-    selectionEndCell = selectionStartCell;
-    
-    // 선택 영역 업데이트
-    selectCellsInRange(selectionStartCell, selectionEndCell);
-}
-
-// 마우스/터치 위치로부터 셀 좌표 계산
-function getCellCoordinatesFromPosition(x, y) {
-    // 그리드 위치 및 크기 정보 가져오기
-    const gridRect = gameGridElement.getBoundingClientRect();
-    
-    // 화면이 세로 모드인지 확인 (aspect < 1일 경우 세로 모드)
-    const isVertical = aspect < 1;
-    
-    // 현재 표시되는 행/열 수
-    const displayRows = isVertical ? COLS : ROWS;
-    const displayCols = isVertical ? ROWS : COLS;
-    
-    // 그리드 내 상대 위치 계산 (패딩 고려)
-    const relativeX = x - gridRect.left - GRID_PADDING;
-    const relativeY = y - gridRect.top - GRID_PADDING;
-    
-    // 유효하지 않은 좌표는 가장 가까운 유효한 셀로 보정
-    let validRelativeX = Math.max(0, relativeX);
-    let validRelativeY = Math.max(0, relativeY);
-    
-    // 세로 모드와 가로 모드에 따라 셀 좌표 계산
-    // 셀 크기와 간격을 고려하여 행과 열 계산
-    let displayCol = Math.floor(validRelativeX / (CELL_SIZE + GRID_GAP));
-    let displayRow = Math.floor(validRelativeY / (CELL_SIZE + GRID_GAP));
-    
-    // 유효한 범위로 제한
-    displayCol = Math.max(0, Math.min(displayCol, displayCols - 1));
-    displayRow = Math.max(0, Math.min(displayRow, displayRows - 1));
-    
-    // 화면 방향에 따라 원본 그리드 좌표 계산
-    let row, col;
-    if (isVertical) {
-        // 세로 모드: -90도 회전된 좌표 변환 (시계 반대 방향)
-        row = ROWS - 1 - displayCol; // 행 인덱스 반전
-        col = displayRow;
-    } else {
-        // 가로 모드: 원래 좌표 그대로 사용
-        row = displayRow;
-        col = displayCol;
-    }
-    
-    // 좌표가 유효한지 확인 (그리드 영역 밖이면 가장 가까운 셀 반환)
-    if (relativeX < 0 || relativeY < 0 || 
-        relativeX > (CELL_SIZE + GRID_GAP) * displayCols || 
-        relativeY > (CELL_SIZE + GRID_GAP) * displayRows) {
-        // 로그로 유효하지 않은 좌표 기록 (디버깅용)
-        console.debug('유효하지 않은 좌표 보정:', { x, y, relativeX, relativeY, fixedRow: row, fixedCol: col, isVertical });
-    }
-    
-    return { row, col };
-}
-
-// 포인터 이동에 따른 선택 영역 업데이트 (pointermove 이벤트 핸들러)
-function updateSelection(e) {
-    if (isPaused || !isSelecting || timeLeft <= 0) return; // 일시 정지 상태이거나 선택 중이 아닌 경우 무시
-    
-    // selectionStartCell이 null이면 선택을 시작할 수 없음
-    if (!selectionStartCell) {
-        isSelecting = false;
-        return;
-    }
-    
-    // 셀 좌표 계산 (효율적인 방식)
-    const currentCell = getCellCoordinatesFromPosition(e.clientX, e.clientY);
-    
-    // 좌표가 유효한 범위 내에 있는지 확인하고, 범위를 벗어나면 가장 가까운 유효한 셀로 보정
-    const validRow = Math.max(0, Math.min(currentCell.row, ROWS - 1));
-    const validCol = Math.max(0, Math.min(currentCell.col, COLS - 1));
-    
-    const validCell = {
-        row: validRow,
-        col: validCol
-    };
-    
-    // 보정된 좌표로 셀 업데이트
-    if (!selectionEndCell || 
-        validCell.row !== selectionEndCell.row || 
-        validCell.col !== selectionEndCell.col) {
-        
-        selectionEndCell = validCell;
-        selectCellsInRange(selectionStartCell, validCell);
-    }
-}
-
-// 선택 종료
-function endSelection(e) {
-    if (isPaused || !isSelecting || timeLeft <= 0) return; // 일시 정지 상태이거나 선택 중이 아닌 경우 무시
-    
-    isSelecting = false;
-    
-    // 포인터 캡처 해제 - 터치 입력 및 유효한 이벤트에만 적용
-    if (e && e.pointerType === POINTER_TYPE_TOUCH && e.pointerId && 
-        e.target && e.target.hasPointerCapture) {
-        try {
-            // hasPointerCapture 메서드가 존재하고 해당 포인터가 캡처된 경우에만 해제
-            if (typeof e.target.hasPointerCapture === 'function' && 
-                e.target.hasPointerCapture(e.pointerId)) {
-                e.target.releasePointerCapture(e.pointerId);
-            }
-        } catch (error) {
-            console.warn('포인터 캡처 해제 실패:', error);
-        }
-    }
-    
-    // 선택 셀 유효성 검사
-    if (!selectionStartCell || !selectionEndCell) {
-        clearSelection();
-        return;
-    }
-    
-    // 선택된 셀이 없으면 종료
-    if (!selectedCells || selectedCells.length === 0) {
-        clearSelection();
-        return;
-    }
-    
-    // 선택된 셀의 색상 확인 (모두 같은 색상이어야 함)
-    const selectionColor = selectedCells[0].color;
-    const allSameColor = selectedCells.every(cell => cell.color === selectionColor);
-    
-    if (!allSameColor) {
-        clearSelection();
-        return;
-    }
-    
-    // 합이 10인지 확인
-    const sum = calculateSum();
-    if (sum === TARGET_SUM) {
-        // 선택 영역의 크기 계산
-        const selectionWidth = currentSelectionSize.width;
-        const selectionHeight = currentSelectionSize.height;
-        
-        // 점수 계산: (너비 + 높이 - 1) * 선택된 셀의 개수
-        let multiplier = selectionWidth + selectionHeight - 1;
-        
-        // 힌트로 표시된 셀들을 그대로 선택했는지 확인
-        let isUsingHint = isHintVisible && currentHint && currentHint.length === selectedCells.length ? currentHint.every(hintCell => 
-            selectedCells.some(selectedCell => 
-                hintCell.row === selectedCell.row && hintCell.col === selectedCell.col
-            )
-        ) : false;
-        
-        // 현재 표시 중이지 않지만 가장 최근에 표시된 힌트와 일치하는지 확인
-        if (!isUsingHint && lastVisibleHint && lastVisibleHint.length === selectedCells.length) {
-            isUsingHint = lastVisibleHint.every(hintCell => 
-                selectedCells.some(selectedCell => 
-                    hintCell.row === selectedCell.row && hintCell.col === selectedCell.col
-                )
-            );
-            
-            if (isUsingHint) {
-                console.log("가장 최근에 보여진 힌트를 사용했습니다. 점수 배수가 1로 적용됩니다.");
-            }
-        }
-        
-        // 두 번째로 최근에 표시된 힌트와 일치하는지 확인
-        if (!isUsingHint && secondLastVisibleHint && secondLastVisibleHint.length === selectedCells.length) {
-            isUsingHint = secondLastVisibleHint.every(hintCell => 
-                selectedCells.some(selectedCell => 
-                    hintCell.row === selectedCell.row && hintCell.col === selectedCell.col
-                )
-            );
-            
-            if (isUsingHint) {
-                console.log("두 번째로 최근에 보여진 힌트를 사용했습니다. 점수 배수가 1로 적용됩니다.");
-            }
-        }
-        
-        // 힌트를 사용했다면 배수를 1로 설정
-        if (isUsingHint) {
-            console.log("힌트를 사용했습니다. 점수 배수가 1로 적용됩니다.");
-            multiplier = 1;
-        }
-        
-        const pointsEarned = multiplier * selectedCells.length;
-        
-        // 애니메이션과 함께 선택된 셀의 레이어 밝히기
-        revealNextLayerWithAnimation();
-        
-        score += pointsEarned;
-        
-        updateUI();
-        
-        // 마지막 클리어 시간 업데이트
-        lastClearTime = Date.now();
-        
-        // 힌트가 표시 중이면 제거하고 타이머도 정리
-        hideHint(true);
-
-        return;
-    }
-    clearSelection();
-}
-
-// 범위 내의 셀 선택 (같은 색상만 허용)
-function selectCellsInRange(startCell, endCell) {
-    // startCell 또는 endCell이 null이면 선택 취소
-    if (!startCell || !endCell) {
-        clearSelection();
-        return;
-    }
-    
-    // 범위 계산
-    const minRow = Math.min(startCell.row, endCell.row);
-    const maxRow = Math.max(startCell.row, endCell.row);
-    const minCol = Math.min(startCell.col, endCell.col);
-    const maxCol = Math.max(startCell.col, endCell.col);
-    
-    // 시작 셀의 색상 확인 (그리드 범위 체크 추가)
-    if (startCell.row < 0 || startCell.row >= ROWS || startCell.col < 0 || startCell.col >= COLS ||
-        !grid[startCell.row] || !grid[startCell.row][startCell.col]) {
-        clearSelection();
-        return;
-    }
-    
-    const startCellColor = grid[startCell.row][startCell.col].color;
-    
-    // 선택 영역의 너비와 높이 계산
-    const selectionWidth = maxCol - minCol + 1;
-    const selectionHeight = maxRow - minRow + 1;
-    currentSelectionSize = {
-        width: selectionWidth,
-        height: selectionHeight
-    };
-    
-    // 현재 선택될 셀과 이전에 선택된 셀의 차이 계산
-    const newSelectedIds = new Set();
-    const newSelectedCells = [];
-    
-    // 새로 선택될 셀 식별
-    for (let i = minRow; i <= maxRow; i++) {
-        for (let j = minCol; j <= maxCol; j++) {
-            // 유효한 셀이고 같은 색상인지 확인
-            if (grid[i][j] && grid[i][j].value > 0 && grid[i][j].color === startCellColor) {
-                const cellId = `${i}-${j}`;
-                newSelectedIds.add(cellId);
-                
-                // 선택된 셀 정보 추가
-                newSelectedCells.push({
-                    row: i, 
-                    col: j, 
-                    value: grid[i][j].value,
-                    color: grid[i][j].color,
-                    layerDepth: grid[i][j].layerDepth
-                });
-            }
-        }
-    }
-    
-    // 이전에 선택된 셀 중 선택 취소해야 할 셀 식별
-    const currentSelectedIds = selectedCells.map(cell => `${cell.row}-${cell.col}`);
-    
-    // 1. 이전에 선택된 셀 중 선택 취소해야 할 셀 선택 해제
-    for (const id of currentSelectedIds) {
-        if (!newSelectedIds.has(id)) {
-            const cell = cellElements[id];
-            if (cell) {
-                cell.classList.remove('selected');
-            }
-        }
-    }
-    
-    // 2. 새로 선택해야 할 셀 선택 추가
-    for (const id of newSelectedIds) {
-        if (!currentSelectedIds.includes(id)) {
-            const cell = cellElements[id];
-            if (cell) {
-                cell.classList.add('selected');
-            }
-        }
-    }
-    
-    // 선택된 셀 목록 업데이트
-    selectedCells = newSelectedCells;
-    
-    // 합계 계산하여 UI 업데이트
-    updateUI();
-}
-
-// 선택 해제
-function clearSelection() {
-    // 선택된 셀이 없으면 불필요한 작업 방지
-    if (selectedCells.length === 0 && !selectionStartCell && !selectionEndCell) return;
-    
-    // 선택된 모든 셀에서 선택 클래스 제거
-    for (const cell of selectedCells) {
-        const cellId = `${cell.row}-${cell.col}`;
-        const cellElement = cellElements[cellId];
-        if (cellElement) {
-            cellElement.classList.remove('selected');
-        }
-    }
-    
-    // 모든 선택 관련 변수 초기화
-    selectedCells = [];
-    selectionStartCell = null;
-    selectionEndCell = null;
-    
-    // UI 업데이트
-    updateUI();
-}
-
-// 선택된 셀의 합 계산
-function calculateSum() {
-    return selectedCells.reduce((sum, cell) => sum + cell.value, 0);
-}
-
-// 다음 레이어 표시 (애니메이션 적용)
-function revealNextLayerWithAnimation() {
-    if (selectedCells.length === 0) return;
-    
-    // 현재 남은 힌트의 수 파악
-    const hints = findHints();
-    const hintsCount = hints.length;
-    
-    // 게임 상태 변경 표시 (힌트 캐시 무효화)
-    gameStateChanged = true;
-    cachedHints = null;
-    lastShownHintIndex = -1; // 힌트 인덱스도 초기화
-    lastVisibleHint = null; // 이전 힌트도 초기화
-    secondLastVisibleHint = null; // 두 번째 이전 힌트도 초기화
-    
-    // 선택된 셀들의 복사본 생성
-    const cellsToReveal = [...selectedCells];
-    
-    // 선택 방향 확인 (애니메이션 순서를 위해)
-    if (selectionStartCell && selectionEndCell) {
-        // 가로 방향 (왼쪽->오른쪽 또는 오른쪽->왼쪽)
-        const isRightToLeft = selectionEndCell.col < selectionStartCell.col;
-        
-        // 세로 방향 (위->아래 또는 아래->위)
-        const isBottomToTop = selectionEndCell.row < selectionStartCell.row;
-        
-        // 가로와 세로 중 어느 방향으로 더 많이 움직였는지 계산
-        const horizontalDistance = Math.abs(selectionEndCell.col - selectionStartCell.col);
-        const verticalDistance = Math.abs(selectionEndCell.row - selectionStartCell.row);
-        const isPrimarilyHorizontal = horizontalDistance >= verticalDistance;
-        
-        // 선택 방향에 따라 셀 정렬
-        cellsToReveal.sort((a, b) => {
-            // 가로 방향이 주요 방향이면 (가로 변화가 세로 변화보다 크거나 같은 경우)
-            if (isPrimarilyHorizontal) {
-                // 왼쪽에서 오른쪽으로 또는 오른쪽에서 왼쪽으로 정렬
-                const colCompare = isRightToLeft ? b.col - a.col : a.col - b.col;
-                // 열이 같을 경우 행으로 비교 (위에서 아래로 또는 아래에서 위로)
-                return colCompare === 0 ? (isBottomToTop ? b.row - a.row : a.row - b.row) : colCompare;
-            } 
-            // 세로 방향이 주요 방향이면
-            else {
-                // 위에서 아래로 또는 아래에서 위로 정렬
-                const rowCompare = isBottomToTop ? b.row - a.row : a.row - b.row;
-                // 행이 같을 경우 열로 비교 (왼쪽에서 오른쪽으로 또는 오른쪽에서 왼쪽으로)
-                return rowCompare === 0 ? (isRightToLeft ? b.col - a.col : a.col - b.col) : rowCompare;
-            }
         });
-        
-        console.log(`선택 방향: ${isRightToLeft ? '오른쪽->왼쪽' : '왼쪽->오른쪽'}, ${isBottomToTop ? '아래->위' : '위->아래'}, 주요 방향: ${isPrimarilyHorizontal ? '가로' : '세로'}`);
-    }
-    
-    // 셀을 하나씩 애니메이션으로 레이어 변경
-    cellsToReveal.forEach((cell, index) => {
-        // 그리드 데이터에서 현재 셀 정보 확인
-        const currentCell = grid[cell.row][cell.col];
-        // 레이어 깊이 증가
-        const newLayerDepth = currentCell.layerDepth + 1;
-            
-        // 새 레이어 색상 결정 (교대로 주황/파랑)
-        const newColor = COLORS[newLayerDepth % COLORS.length];
-        
-        // 남은 힌트 수에 따라 1/sqrt(hintsCount) 확률로 벤포드 법칙 사용
-        let newValue;
-        
-        // 벤포드 법칙 확률 계산 (힌트 수가 많을수록 낮아짐)
-        const useBenfordProbability = 1.0 / Math.sqrt(hintsCount);
-        
-        if (getRandom().next() < useBenfordProbability) {
-            // 벤포드 법칙 사용
-            newValue = getRandom().nextInt(1, 9);
-            console.log(`벤포드 법칙 적용 (힌트 수: ${hintsCount}, 확률: ${(useBenfordProbability * 100).toFixed(2)}%) - 생성된 값: ${newValue}`);
-        } else {
-            // 기존 방식 사용
-            const position = cell.row * COLS + cell.col;
-            newValue = (pseudoPermutation(200*9, position, 4, newLayerDepth) % 9) + 1; // 1~9 범위
-        }
-            
-        // 그리드 데이터 업데이트
-        grid[cell.row][cell.col] = {
-            value: newValue,
-            layerDepth: newLayerDepth,
-            color: newColor
-        };
-        
-        setTimeout(() => {
-            
-            // 현재 셀의 DOM 요소 찾기
-            const cellElement = document.querySelector(`.cell[data-row="${cell.row}"][data-col="${cell.col}"]`);
-            
-            if (!(cellElement && currentCell)) {
-                return;
-            }
-            // 실제 위치에 셀을 고정 (애니메이션용 복제본을 위해)
-            const rect = cellElement.getBoundingClientRect();
-                
-            // 클론 생성 (사라지는 애니메이션용)
-            const cellClone = cellElement.cloneNode(true);
-            cellClone.style.position = 'fixed';
-            cellClone.style.left = `${rect.left}px`;
-            cellClone.style.top = `${rect.top}px`;
-            cellClone.style.zIndex = '1000';
-            cellClone.style.pointerEvents = 'none';
-            cellClone.classList.add('falling');
-            document.body.appendChild(cellClone);
-                
-                
-            // DOM 요소 업데이트
-            cellElement.textContent = newValue;
-                
-            // 색상 클래스 업데이트
-            cellElement.classList.remove('orange-layer', 'blue-layer');
-            cellElement.classList.add(`${newColor}-layer`);
-                
-            // 물리 애니메이션 파라미터
-            const physics = {
-                // 각도: 45~135도 사이 (위쪽 방향)
-                angle: (45 + getRandom().next() * 90) * Math.PI / 180,
-                // 초기 속도: 200~300 픽셀/초
-                initialSpeed: 200 + getRandom().next() * 100,
-                // 회전 속도: -360~360도/초
-                rotationSpeed: -360 + getRandom().next() * 720,
-                // 중력 가속도: 980 픽셀/초^2 (물리학적 중력과 유사)
-                gravity: 980,
-                // 애니메이션 지속 시간: 0.8~1.2초
-                duration: 400 + getRandom().next() * 400,
-                // 타임스탬프 초기화
-                startTime: null,
-                // 위치 및 회전 추적
-                x: 0,
-                y: 0,
-                rotation: 0,
-                opacity: 1,
-                element: cellClone
-            };
-                
-            // 애니메이션 시작
-            startPhysicsAnimation(physics, () => {
-                cellClone.remove();
-            });
-        }, index * 50); // 각 셀마다 약간의 지연 시간
-    });
+    }, limit * 1000);
 
-    // 누적 합 테이블 업데이트
-    buildAllPrefixSums();
-            
-    // 힌트 미리 계산
-    precomputeHints();
-    
-    // 선택 해제
-    clearSelection();
+    gameTimer.onStart(() => timerUIUpdateInterval = setInterval(updateTimerUI, 100));
+    gameTimer.onResume(() => timerUIUpdateInterval = setInterval(updateTimerUI, 100));
+    gameTimer.onPause(() => clearInterval(timerUIUpdateInterval));
+    gameTimer.onReset(() => clearInterval(timerUIUpdateInterval));
 }
 
-// 특정 셀 값 변경 시 누적 합 테이블 업데이트 (점진적 업데이트)
-function updatePrefixSum(prefixSum, row, col, oldValue, newValue) {
-    // 그리드에서 0 이하의 값은 합계에 포함되지 않으므로 실제 계산 값 조정
-    const actualOldValue = oldValue && oldValue.value > 0 ? oldValue.value : 0;
-    const actualNewValue = newValue && newValue.value > 0 ? newValue.value : 0;
-    
-    // 변경된 차이 계산
-    const diff = actualNewValue - actualOldValue;
-    
-    // 변경이 없으면 업데이트 필요 없음
-    if (diff === 0) return;
-    
-    // 영향 받는 누적 합 영역만 업데이트 (row+1, col+1부터 끝까지)
-    for (let i = row + 1; i <= ROWS; i++) {
-        for (let j = col + 1; j <= COLS; j++) {
-            prefixSum[i][j] += diff;
-        }
-    }
-}
+const hintWaitTimer = new Timer(showHint, 5000);
+const hintDisplayTimer = new Timer(hideHint, 3000);
+hintWaitTimer.then(hintDisplayTimer).then(hintWaitTimer);
 
-// 누적 합 테이블 구축 - 색상별로 구분하여 생성
-function buildAllPrefixSums() {
-    console.time("모든 PrefixSum 테이블 구축");
-    
-    // 일반 누적 합 테이블 (색상 구분 없이)
-    prefixSumTable = buildPrefixSum(grid, ROWS, COLS, null);
-    
-    // 색상별 누적 합 테이블
-    orangePrefixSumTable = buildPrefixSum(grid, ROWS, COLS, 'orange');
-    bluePrefixSumTable = buildPrefixSum(grid, ROWS, COLS, 'blue');
-    
-    console.timeEnd("모든 PrefixSum 테이블 구축");
-}
-
-// 누적 합 테이블(Prefix Sum) 구축 - 특정 색상에 대한 누적 합 계산
-function buildPrefixSum(grid, ROWS, COLS, color) {
-    console.time(`PrefixSum 테이블 구축 (${color || 'all'})`);
-    // 크기를 1 더 크게 해서 경계 조건 처리를 간단히 함
-    const prefixSum = Array(ROWS + 1).fill().map(() => Array(COLS + 1).fill(0));
-    
-    // 모든 셀에 대해 누적 합 계산
-    for (let i = 1; i <= ROWS; i++) {
-        for (let j = 1; j <= COLS; j++) {
-            // 현재 셀이 유효한지 확인 (값이 있고, 색상이 일치하거나 색상 필터가 없는 경우)
-            const cell = grid[i-1][j-1];
-            const cellValue = cell && cell.value > 0 && (!color || cell.color === color) ? cell.value : 0;
-            
-            // 현재 셀 값 + 왼쪽까지의 합 + 위쪽까지의 합 - 중복 계산된 왼쪽 위 대각선 영역
-            prefixSum[i][j] = cellValue + 
-                             prefixSum[i-1][j] + 
-                             prefixSum[i][j-1] - 
-                             prefixSum[i-1][j-1];
-        }
-    }
-    console.timeEnd(`PrefixSum 테이블 구축 (${color || 'all'})`);
-    return prefixSum;
-}
-
-// 누적 합 테이블에서 직사각형 영역의 합을 계산
-function getRectangleSum(prefixSum, r1, c1, r2, c2) {
-    // 직사각형 영역 합 계산 - O(1) 시간 복잡도
-    return prefixSum[r2+1][c2+1] - prefixSum[r2+1][c1] - prefixSum[r1][c2+1] + prefixSum[r1][c1];
-}
-
-// 직사각형 영역이 유효한지 확인 (색상 고려)
-function isValidRectangle(grid, r1, c1, r2, c2) {
-    // 적어도 하나의 셀이 존재하는지 확인
-    let hasCell = false;
-    
-    // 첫 번째 유효한 셀 색상 확인 (모든 셀은 같은 색이어야 함)
-    let firstCellColor = null;
-    
-    // 합계 및 유효한 셀 카운트 초기화
-    let validCellCount = 0;
-    let sum = 0;
-    
-    for (let i = r1; i <= r2; i++) {
-        for (let j = c1; j <= c2; j++) {
-            // 셀이 존재하고 값이 있는 경우
-            if (grid[i][j] && grid[i][j].value > 0) {
-                hasCell = true;
-                
-                // 첫 번째 색상 설정 또는 확인
-                if (firstCellColor === null) {
-                    firstCellColor = grid[i][j].color;
-                } 
-                // 다른 색상 셀이 있으면 유효하지 않음
-                else if (grid[i][j].color !== firstCellColor) {
-                    return false;
-                }
-                
-                validCellCount++;
-                sum += grid[i][j].value;
-                
-                // 합이 이미 목표값을 초과하면 바로 유효하지 않음
-                if (sum > TARGET_SUM) {
-                    return false;
-                }
-            }
-        }
-    }
-    
-    // 2개 이상의 유효한 셀이 있고, 합이 목표값과 일치하는지 확인
-    return hasCell && validCellCount >= 2 && sum === TARGET_SUM;
-}
-
-
-// 영역이 이미 힌트 목록에 있는지 확인 (중복 검사)
-function isDuplicateHint(hints, cells) {
-    return hints.some(hint => 
-        hint.length === cells.length && 
-        hint.every(cell => 
-            cells.some(c => c.row === cell.row && c.col === cell.col)
-        )
-    );
-}
-
-// 힌트 검색 - 합이 TARGET_SUM이 되는 영역 찾기 (효율적인 누적 합 테이블 사용)
-function findHints() {
-    // 게임이 이미 종료된 상태인지 확인
-    const gameOverElement = document.getElementById('game-over');
-    if (gameOverElement && gameOverElement.style.display === 'flex') {
-        console.log("게임이 이미 종료되어 힌트 검색을 중단합니다.");
-        return null;
-    }
-
-    // 게임 상태가 변경되지 않았고 캐시된 힌트가 있으면 재사용
-    if (!gameStateChanged && cachedHints && cachedHints.length > 0) {
-        console.log(`게임 상태가 변경되지 않아 캐시된 힌트(${cachedHints.length}개)를 재사용합니다.`);
-        return cachedHints;
-    }
-    
-    console.time("힌트 검색 (PrefixSum)");
-    console.log(`게임 상태가 변경되어 새로운 힌트를 계산합니다...`);
-    const hints = [];
-    
-    // 누적 합 테이블 구축 또는 업데이트
-    if (!prefixSumTable || !orangePrefixSumTable || !bluePrefixSumTable || gameStateChanged) {
-        console.log("누적 합 테이블 새로 구축");
-        buildAllPrefixSums();
-    } else {
-        console.log("기존 누적 합 테이블 사용");
-    }
-    
-    // 색상별로 힌트 찾기
-    for (const color of COLORS) {
-        // 색상에 맞는 누적 합 테이블 선택
-        const colorPrefixSum = color === 'orange' ? orangePrefixSumTable : bluePrefixSumTable;
-        
-        // 빈 셀이 아니고 현재 색상과 일치하는 셀 정보 수집
-        const validCells = [];
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                if (grid[r][c] && grid[r][c].value > 0 && grid[r][c].color === color) {
-                    validCells.push({row: r, col: c});
-                }
-            }
-        }
-        
-        console.log(`${color} 색상의 유효한 셀 ${validCells.length}개를 사용하여 힌트를 검색합니다.`);
-        
-        // 각 유효한 셀을 탐색하여 가능한 직사각형 영역 찾기
-        for (let i = 0; i < validCells.length; i++) {
-            const startCell = validCells[i];
-            
-            for (let j = i; j < validCells.length; j++) {
-                const endCell = validCells[j];
-                
-                // 유효한 직사각형 영역 좌표 계산
-                const r1 = Math.min(startCell.row, endCell.row);
-                const c1 = Math.min(startCell.col, endCell.col);
-                const r2 = Math.max(startCell.row, endCell.row);
-                const c2 = Math.max(startCell.col, endCell.col);
-                
-                // 직사각형 영역의 합을 효율적으로 계산
-                const sum = getRectangleSum(colorPrefixSum, r1, c1, r2, c2);
-                
-                // 합이 목표값과 일치하는지 확인
-                if (sum === TARGET_SUM) {
-                    // 직사각형 영역 내의 현재 색상과 일치하는 셀들 수집
-                    const rectCells = [];
-                    for (let r = r1; r <= r2; r++) {
-                        for (let c = c1; c <= c2; c++) {
-                            if (grid[r][c] && grid[r][c].value > 0 && grid[r][c].color === color) {
-                                rectCells.push({
-                                    row: r, 
-                                    col: c, 
-                                    value: grid[r][c].value,
-                                    color: grid[r][c].color
-                                });
-                            }
-                        }
-                    }
-                    
-                    // 최소 2개 이상의 셀이 있어야 유효한 힌트
-                    if (rectCells.length >= 2 && !isDuplicateHint(hints, rectCells)) {
-                        hints.push(rectCells);
-                    }
-                }
-            }
-        }
-    }
-
-    if (hints.length === 0) {
-        console.log("힌트를 찾을 수 없습니다. 더 이상 가능한 조합이 없습니다.");
-        
-        // 선택 상태를 먼저 완전히 초기화
-        clearSelection();
-        
-        // 추가로 선택 상태 변수를 명시적으로 초기화
-        isSelecting = false;
-        selectionStartCell = null;
-        selectionEndCell = null;
-        selectedCells = [];
-        
-        // 모든 셀에서 선택 클래스 제거 (추가 안전장치)
-        document.querySelectorAll('.cell.selected').forEach(cell => {
-            cell.classList.remove('selected');
-        });
-        
-        // falling 클래스를 가진 모든 요소 제거 (애니메이션 도중 남은 요소들)
-        document.querySelectorAll('.cell.falling').forEach(cell => {
-            if (cell.parentNode) {
-                cell.parentNode.removeChild(cell);
-            }
-        });
-        
-        // 그 후에 게임 종료 처리
-        setTimeout(() => {
-            checkStageCompletion('가능한 조합이 없습니다.');
-        }, 10);
-        
-        return;
-    }
-    
-    console.log(`PrefixSum 방식으로 ${hints.length}개의 가능한 힌트를 찾았습니다.`);
-    console.timeEnd("힌트 검색 (PrefixSum)");
-    
-    // 게임 상태가 변경되었으므로 새로운 힌트를 캐시에 저장
-    cachedHints = [...hints];
-    gameStateChanged = false;
-    console.log(`힌트 ${hints.length}개를 캐시에 저장했습니다. 다음에 재사용할 수 있습니다.`);
-    
-    return hints;
-}
-
-
-// 힌트 표시
-function showHint() {
-    // 게임 종료 상태이거나 일시 정지 상태면 힌트 표시 안 함
-    if (timeLeft <= 0 || isPaused) {
-        return;
-    }
-    
-    // 이미 힌트가 표시 중이면 제거
-    if (isHintVisible) {
-        hideHint(false);
-    }
-    
-    // 새로운 힌트 세트를 가져올 때마다 인덱스 초기화 (다양한 힌트 표시를 위해)
-    if (gameStateChanged) {
-        lastShownHintIndex = -1;
-    }
-    
-    // 힌트 계산 (캐시 활용)
-    const hints = findHints();
-    
-    console.log(`${hints.length}개의 힌트 중에서 표시할 힌트를 선택합니다.`);
-    
-    // 힌트 랜덤하게 선택 (이전과 다른 힌트)
-    const randomIndex = getRandomDifferentHintIndex(hints.length);
-    currentHint = hints[randomIndex];
-    lastShownHintIndex = randomIndex; // 현재 표시된 힌트 인덱스 저장
-    showCurrentHint();
-}
-
-// 이전과 다른 랜덤 힌트 인덱스 가져오기
-function getRandomDifferentHintIndex(hintsLength) {
-    let newIndex;
-    
-    do {
-        newIndex = Math.floor(getRandom().next() * hintsLength);
-    } while (newIndex === lastShownHintIndex);
-    
-    return newIndex;
-}
-
-// 선택된 힌트 표시
-function showCurrentHint() {
-    if (!currentHint) return;
-    
-    // 일시 정지 상태면 힌트 표시만 하고 타이머는 시작하지 않음
-    if (isPaused) {
-        return;
-    }
-    
-    // 추가 유효성 검사 - 힌트를 표시하기 전에 모든 셀이 유효한지 확인
-    const allValid = currentHint.every(cell => 
-        cell.row >= 0 && cell.row < ROWS && 
-        cell.col >= 0 && cell.col < COLS && 
-        grid[cell.row][cell.col] && grid[cell.row][cell.col].value > 0
-    );
-    
-    if (!allValid) {
-        return;
-    }
-    
-    // 이전 힌트 요소들 모두 제거 (안전 장치)
-    document.querySelectorAll('.cell.hint').forEach(cell => {
-        cell.classList.remove('hint');
-    });
-    
-    // 새 힌트 표시
-    currentHint.forEach(cell => {
-        const cellElement = document.querySelector(`.cell[data-row="${cell.row}"][data-col="${cell.col}"]`);
-        if (cellElement && !cellElement.classList.contains('empty')) {
-            cellElement.classList.add('hint');
-        } else {
-            console.log(`유효하지 않은 힌트 셀: ${cell.row},${cell.col}`);
-        }
-    });
-    
-    isHintVisible = true;
-}
-
-// 힌트 제거
-function hideHint(resetTimer = true) {
-    // 현재 힌트를 이전 힌트들로 이동
-    if (currentHint) {
-        // 두 번째 최근 힌트에 가장 최근 힌트 저장
-        secondLastVisibleHint = lastVisibleHint ? [...lastVisibleHint] : null;
-        // 가장 최근 힌트에 현재 힌트 저장
-        lastVisibleHint = [...currentHint];
-    }
-    
-    // 모든 힌트 셀 클래스 제거 (안전성 향상)
-    document.querySelectorAll('.cell.hint').forEach(cell => {
-        cell.classList.remove('hint');
-    });
-
-    if (resetTimer) {
-        hintWaitTimer.reset();
-        hintDisplayTimer.reset();
-        hintWaitTimer.start();
-    }
-    // 상태 초기화
-    currentHint = null;
-    isHintVisible = false;
-}
-
-// 물리 기반 애니메이션 시작
-function startPhysicsAnimation(physics, onComplete) {
-    // 일시 정지 상태에서는 애니메이션을 시작하지 않음
-    // if (isPaused) {
-    //     onComplete();
-    //     return;
-    // }
-    
-    // 애니메이션 시작 시간 기록
-    physics.startTime = performance.now();
-    
-    // 애니메이션 ID를 저장할 변수
-    let animationId = null;
-    
-    // 애니메이션 함수
-    function animate(timestamp) {
-        // 일시 정지 상태라면 애니메이션 중지
-        if (gameTimer.state === 'paused') {
-            return;
-        }
-        
-        // 경과 시간 계산 (초 단위)
-        const elapsed = (timestamp - physics.startTime) / 1000;
-        
-        // 애니메이션 지속 시간을 초과하면 종료
-        if (elapsed >= physics.duration / 1000) {
-            // 애니메이션 목록에서 제거
-            const index = activeAnimations.indexOf(animationId);
-            if (index !== -1) {
-                activeAnimations.splice(index, 1);
-            }
-            onComplete();
-            return;
-        }
-        
-        // 초기 속도 분해
-        const vx = physics.initialSpeed * Math.cos(physics.angle);
-        const vy = -physics.initialSpeed * Math.sin(physics.angle); // 위쪽이 음수 방향
-        
-        // 포물선 운동 계산
-        physics.x = vx * elapsed;
-        physics.y = vy * elapsed + 0.5 * physics.gravity * elapsed * elapsed;
-        
-        // 회전 계산
-        physics.rotation = physics.rotationSpeed * elapsed;
-        
-        // 투명도 계산 (후반부에 더 빠르게 투명해짐)
-        const normalizedTime = elapsed / (physics.duration / 1000);
-        physics.opacity = normalizedTime < 0.7 ? 1 : 1 - ((normalizedTime - 0.7) / 0.3);
-
-        const scale = 1 + normalizedTime * ((physics.scale ?? 1) - 1)
-        
-        // 스타일 적용
-        physics.element.style.transform = `translate(${physics.x}px, ${physics.y}px) rotate(${physics.rotation}deg) scale(${scale})`;
-        physics.element.style.opacity = physics.opacity;
-        
-        // 다음 프레임 요청
-        animationId = requestAnimationFrame(animate);
-    }
-    
-    // 애니메이션 시작
-    animationId = requestAnimationFrame(animate);
-    
-    // 활성 애니메이션 목록에 추가
-    activeAnimations.push(animationId);
-}
-
-
-// UI 업데이트
-function updateUI() {
-    sumElement.textContent = calculateSum();
-    scoreElement.textContent = score;
-    timeElement.textContent = timeLeft.toFixed(1);
-}
-
-// 타이머 UI 업데이트 함수
-function updateTimerUI() {
-    if (isPaused) return;
-    
-    // 남은 시간 계산 (시간이 지남에 따라 감소)
-    const currentState = gameTimer.getState();
-    const remainingTime = gameTimer.getRemainingTime();
-    
-    timeLeft = Math.max(0, remainingTime / 1000);
-    
-    // 타이머 표시 업데이트
-    timeElement.textContent = timeLeft.toFixed(1);
-    
-    // 기존 모든 타이머 관련 클래스 제거
-    timeElement.classList.remove('time-warning', 'time-blink-10', 'time-blink-5', 'time-blink-1');
-    
-    // 시간에 따라 다른 깜빡임 효과 적용
-    if (timeLeft <= 1) {
-        // 1초 이하: 1초에 5번 깜빡임 (0.2초 간격)
-        timeElement.classList.add('time-blink-1');
-    } else if (timeLeft <= 5) {
-        // 5초 이하: 1초에 2번 깜빡임 (0.5초 간격)
-        timeElement.classList.add('time-blink-5');
-    } else if (timeLeft <= 10) {
-        // 10초 이하: 1초에 한번 깜빡임
-        timeElement.classList.add('time-blink-10');
-    }
-}
-
-// 게임 종료
-function endGame(message = '') {
-    // 타이머 정리
-    gameTimer.reset();
-    hintWaitTimer.reset();
-    hintDisplayTimer.reset();
-    
-    // 힌트 숨기기 (화면에서만 제거)
-    document.querySelectorAll('.cell.hint').forEach(cell => {
-        cell.classList.remove('hint');
-    });
-    
-    // 선택 영역 초기화
-    clearSelection();
-    
-    // 추가로 선택 상태 변수 초기화
-    isSelecting = false;
-    selectionStartCell = null;
-    selectionEndCell = null;
-    selectedCells = [];
-    
-    // 모든 셀에서 선택 클래스 제거 (추가 안전장치)
-    document.querySelectorAll('.cell.selected').forEach(cell => {
-        cell.classList.remove('selected');
-    });
-    
-    // falling 클래스를 가진 모든 요소 제거 (애니메이션 도중 남은 요소들)
-    document.querySelectorAll('.cell.falling').forEach(cell => {
-        if (cell.parentNode) {
-            cell.parentNode.removeChild(cell);
-        }
-    });
-    
-    // 진행 중인 애니메이션 중지
-    activeAnimations.forEach(id => {
-        cancelAnimationFrame(id);
-    });
-    activeAnimations = [];
-    
-    // 게임 오버 메시지 설정 및 표시
-    const gameOverElement = document.getElementById('game-over');
-    if (gameOverElement) {
-        const messageElement = document.getElementById('game-over-message');
-        if (messageElement) {
-            messageElement.textContent = message || '게임 종료!';
-        }
-        
-        // 점수 애니메이션 (스테이지 클리어가 아닌 경우에만)
-        const stageClearInfoElement = document.getElementById('stage-clear-info');
-        const scoreDisplayElement = document.querySelector('.score-display');
-        
-        // 스테이지 클리어가 아닌 경우, 스테이지 클리어 정보를 숨기고 다음 스테이지 버튼도 숨김
-        stageClearInfoElement.style.display = 'none';
-        const nextStageBtn = document.getElementById('next-stage-btn');
-        if (nextStageBtn) {
-            nextStageBtn.style.display = 'none';
-        }
-        
-        if (scoreDisplayElement && stageClearInfoElement && stageClearInfoElement.style.display !== 'block') {
-            // 초기 상태: 0점
-            scoreDisplayElement.textContent = '0';
-            
-            // 애니메이션 시작 시간
-            const startTime = performance.now();
-            // 애니메이션 지속 시간 (밀리초)
-            const duration = 1000;
-            
-            // 애니메이션 함수
-            function animateScore(currentTime) {
-                // 경과 시간 계산 (0~1 범위)
-                const elapsed = Math.min(1, (currentTime - startTime) / duration);
-                
-                // 이징 함수 적용 (부드러운 시작과 종료)
-                const eased = elapsed;
-                
-                // 현재 점수 계산
-                const currentScore = Math.floor(eased * score);
-                
-                // 점수 업데이트
-                scoreDisplayElement.textContent = currentScore;
-                
-                // 애니메이션 완료 여부 확인
-                if (elapsed < 1) {
-                    // 애니메이션 계속
-                    requestAnimationFrame(animateScore);
-                }
-            }
-            
-            // 애니메이션 시작
-            requestAnimationFrame(animateScore);
-            
-            // 게임 오버 컨텐츠에 애니메이션 클래스 추가
-            const gameOverContent = document.querySelector('.game-over-content');
-            if (gameOverContent) {
-                gameOverContent.classList.add('animating');
-                // 애니메이션 완료 후 클래스 제거
-                setTimeout(() => {
-                    gameOverContent.classList.remove('animating');
-                }, duration);
-            }
-        }
-        
-        gameOverElement.style.display = 'flex';
-    }
-}
-
-// 힌트 미리 계산하기 - 상태 변경 후 즉시 실행하여 응답성 향상
-function precomputeHints() {
-    console.log("게임 상태 변경 감지 - 힌트 미리 계산 시작");
-    // 이미 게임 상태가 변경된 상태로 설정
-    gameStateChanged = true;
-    
-    // 힌트 계산 및 캐시 업데이트 - 백그라운드에서 처리하여 UI 응답성 유지
-    setTimeout(() => {
-        // 게임이 이미 종료된 상태인지 확인
-        const gameOverElement = document.getElementById('game-over');
-        if (gameOverElement && gameOverElement.style.display === 'flex') {
-            console.log("게임이 이미 종료되어 힌트 계산을 중단합니다.");
-            return;
-        }
-
-        const startTime = performance.now();
-        const hints = findHints();
-        // hints가 undefined가 아닌 경우에만 로그 출력
-        if (hints) {
-            const endTime = performance.now();
-            console.log(`힌트 선제 계산 완료: ${hints.length}개 힌트, 소요 시간: ${(endTime - startTime).toFixed(2)}ms`);
-        }
-    }, 0);
-}
-
-// 스테이지 선택 다이얼로그 관련 코드
-const stageDialog = document.getElementById('stage-selection-dialog');
-const stagesContainer = document.querySelector('.stages-container');
-const stageNumberElement = document.querySelector('#stage-number .stage-number');
-const stageTemplate = document.getElementById('stage-template');
-const prevPageButton = document.getElementById('prev-page');
-const nextPageButton = document.getElementById('next-page');
-const pageDisplay = document.getElementById('page-display');
-const pageNumbersContainer = document.querySelector('.page-numbers');
-
-// 스테이지 다이얼로그가 열릴 때마다 최신 데이터 로드
-if (stageDialog) {
-    // showModal 메서드가 호출될 때 데이터 로드
-    const originalShowModal = stageDialog.showModal;
-    stageDialog.showModal = function() {
-        console.log('스테이지 다이얼로그 열림 - 최신 데이터 로드');
-        // 데이터 최신화
-        stageData.loadFromStorage();
-        generateStages();
-        updatePageControls();
-        return originalShowModal.apply(this, arguments);
-    };
-}
-
-// 페이지네이션 변수
-let currentPage = 1;
-const totalPages = 10;
-const stagesPerPage = 100;
-
-// 다이얼로그 표시 함수
-function showStageSelection() {
-    // 데이터 업데이트를 위해 항상 최신 데이터 로드
-    stageData.loadFromStorage();
-    console.log('스테이지 선택화면 표시 - 최신 데이터 로드:', stageData.completedStages, stageData.stageScores);
-    
-    // 페이지가 이미 초기화되었는지 확인
-    if (stagesContainer.children.length === 0) {
-        // 첫 로드 시 페이징 초기화
-        initPagination();
-    } else {
-        // 페이지 표시를 현재 완료된 스테이지에 맞게 조정
-        const completedStageLastPage = Math.ceil(stageData.completedStages / stagesPerPage);
-        if (completedStageLastPage > 0 && currentPage > completedStageLastPage) {
-            currentPage = completedStageLastPage;
-        }
-    }
-    
-    // 스테이지 데이터를 항상 새로 생성하여 최신 정보 반영
-    generateStages();
-    
-    // 페이지 컨트롤 업데이트
-    updatePageControls();
-    
-    // 다이얼로그 표시
-    stageDialog.showModal();
-}
-injectGlobal(showStageSelection);
-
-// 페이지네이션 초기화 함수
-function initPagination() {
-    // 페이지 번호 버튼 생성
-    pageNumbersContainer.innerHTML = '';
-    for (let i = 1; i <= totalPages; i++) {
-        const pageNumberBtn = document.createElement('div');
-        pageNumberBtn.className = `page-number${i === currentPage ? ' active' : ''}`;
-        pageNumberBtn.textContent = i;
-        pageNumberBtn.addEventListener('click', () => {
-            if (i !== currentPage) {
-                changePage(i);
-            }
-        });
-        pageNumbersContainer.appendChild(pageNumberBtn);
-    }
-    
-    // 이전/다음 페이지 버튼 이벤트 리스너
-    prevPageButton.addEventListener('click', () => {
-        if (currentPage > 1) {
-            changePage(currentPage - 1);
-        }
-    });
-    
-    nextPageButton.addEventListener('click', () => {
-        if (currentPage < totalPages) {
-            changePage(currentPage + 1);
-        }
-    });
-    
-    // 초기 페이지 상태 업데이트
-    updatePageControls();
-}
-
-// 페이지 변경 함수
-function changePage(newPage) {
-    if (newPage < 1 || newPage > totalPages) return;
-    
-    currentPage = newPage;
-    updatePageControls();
-    generateStages();
-}
-
-// 페이지 컨트롤 업데이트 함수
-function updatePageControls() {
-    // 페이지 표시 업데이트
-    pageDisplay.textContent = `페이지 ${currentPage}/${totalPages}`;
-    
-    // 이전/다음 버튼 활성화/비활성화
-    prevPageButton.disabled = currentPage === 1;
-    nextPageButton.disabled = currentPage === totalPages;
-    
-    // 페이지 번호 버튼 활성화 상태 업데이트
-    const pageNumberButtons = pageNumbersContainer.querySelectorAll('.page-number');
-    pageNumberButtons.forEach((btn, index) => {
-        btn.classList.toggle('active', index + 1 === currentPage);
-    });
-}
-
-// 닫기 버튼 클릭 시 다이얼로그 닫기 및 게임 시작
-stageDialog.addEventListener('click', (e) => {
-    if (e.target === stageDialog) {
-        stageDialog.close();
-        // 현재 선택된 스테이지로 게임 시작
-        initGame(generateStageSeed(currentStageNumber));
-    }
-});
-
-// 스테이지 데이터 (로컬 스토리지에서 불러오거나 기본값 사용)
+// --- Stage Data Logic ---
 const stageData = {
     totalStages: 1000,
     completedStages: 0,
     stageScores: {},
-    
-    // 로컬 스토리지에서 데이터 불러오기
+    currentPage: 1,
+    stagesPerPage: 100,
     loadFromStorage() {
-        const storedData = localStorage.getItem('stageData');
-        if (storedData) {
+        const stored = localStorage.getItem('stageData');
+        if (stored) {
             try {
-                const parsedData = JSON.parse(storedData);
-                this.completedStages = parsedData.completedStages || 0;
-                this.stageScores = parsedData.stageScores || {};
-                console.log('로컬 스토리지에서 스테이지 데이터 불러옴:', this);
-                return true;
-            } catch (error) {
-                console.error('스테이지 데이터 파싱 오류:', error);
-    return false;
-  }
+                const parsed = JSON.parse(stored);
+                this.completedStages = parsed.completedStages || 0;
+                this.stageScores = parsed.stageScores || {};
+                state.frenzyHighScore = parsed.frenzyHighScore || 0;
+            } catch (e) { console.error(e); }
         }
-        console.log('로컬 스토리지에 저장된 데이터가 없음, 기본값 사용');
-        return false;
     },
-    
-    // 로컬 스토리지에 데이터 저장
     saveToStorage() {
-        const dataToSave = {
+        localStorage.setItem('stageData', JSON.stringify({
             completedStages: this.completedStages,
-            stageScores: this.stageScores
-        };
-        try {
-            localStorage.setItem('stageData', JSON.stringify(dataToSave));
-            console.log('스테이지 데이터 저장됨:', dataToSave);
-            return true;
-        } catch (error) {
-            console.error('스테이지 데이터 저장 오류:', error);
-            return false;
-        }
+            stageScores: this.stageScores,
+            frenzyHighScore: state.frenzyHighScore
+        }));
     },
-    
-    // 스테이지 클리어 처리
     clearStage(stageNumber, score) {
-        // 기존 점수와 비교하여 최고 점수 저장
         if (!this.stageScores[stageNumber] || score > this.stageScores[stageNumber]) {
             this.stageScores[stageNumber] = score;
         }
-        
-        // 완료한 스테이지 수 업데이트
-        if (stageNumber > this.completedStages) {
-            this.completedStages = stageNumber;
-        }
-        
-        // 변경사항 저장
+        if (stageNumber > this.completedStages) this.completedStages = stageNumber;
         this.saveToStorage();
-    },
+    }
+};
+
+// --- Dialogs ---
+const modeSelectionDialog = document.getElementById('mode-selection-dialog');
+const stageDialog = document.getElementById('stage-selection-dialog');
+const pauseMenuDialog = document.getElementById('pause-menu-dialog');
+const confirmationDialog = document.getElementById('confirmation-dialog');
+let pendingAction = null;
+
+function showModeSelection() {
+    if (gameTimer) gameTimer.reset();
+    hintWaitTimer.reset();
+    hintDisplayTimer.reset();
+    state.isPaused = false;
+    ui.gameGridElement?.classList.remove('paused');
     
-    // 테스트용 점수 초기화 (실제 사용 시에는 제거)
-    initializeScores() {
-        for (let i = 1; i <= this.completedStages; i++) {
-            // 무작위 점수 생성 (400~1500)
-            if (!this.stageScores[i]) {
-                this.stageScores[i] = Math.floor(getRandom().next() * 1100) + 400;
+    stageData.loadFromStorage();
+    modeSelectionDialog?.showModal();
+}
+
+function showStageSelection() {
+    stageData.currentPage = 1;
+    generateStages();
+    stageDialog?.showModal();
+}
+
+function generateStages() {
+    const container = document.querySelector('.stages-container');
+    const template = document.getElementById('stage-template');
+    const pageDisplay = document.getElementById('page-display');
+    const pageNumbersContainer = document.querySelector('.page-numbers');
+    
+    if (!container || !template) return;
+    
+    container.innerHTML = '';
+    const totalPages = Math.ceil(stageData.totalStages / stageData.stagesPerPage);
+    const startStage = (stageData.currentPage - 1) * stageData.stagesPerPage + 1;
+    const endStage = Math.min(startStage + stageData.stagesPerPage - 1, stageData.totalStages);
+    
+    if (pageDisplay) {
+        pageDisplay.textContent = `페이지 ${stageData.currentPage} / ${totalPages}`;
+    }
+
+    if (pageNumbersContainer) {
+        pageNumbersContainer.innerHTML = '';
+        const range = 2;
+        for (let p = 1; p <= totalPages; p++) {
+            if (p === 1 || p === totalPages || (p >= stageData.currentPage - range && p <= stageData.currentPage + range)) {
+                const pBtn = document.createElement('div');
+                pBtn.className = 'page-number' + (p === stageData.currentPage ? ' active' : '');
+                pBtn.textContent = p;
+                pBtn.onclick = () => {
+                    stageData.currentPage = p;
+                    generateStages();
+                };
+                pageNumbersContainer.appendChild(pBtn);
+            } else if (p === stageData.currentPage - range - 1 || p === stageData.currentPage + range + 1) {
+                const dot = document.createElement('div');
+                dot.textContent = '...';
+                pageNumbersContainer.appendChild(dot);
             }
         }
     }
-};
-
-// 데이터 불러오기
-stageData.loadFromStorage();
-
-// 별점 계산 함수 (0-3개 별)
-function calculateStars(score) {
-    if (score >= 150) return '★★★';
-    if (score >= 100) return '★★☆';
-    if (score >= 50) return '★☆☆';
-    return '☆☆☆';
-}
-
-// 스테이지 타일 동적 생성 함수
-function generateStages() {
-    // 스테이지 컨테이너 비우기
-    stagesContainer.innerHTML = '';
     
-    // 현재 페이지에 해당하는 스테이지 범위 계산
-    const startStage = (currentPage - 1) * stagesPerPage + 1;
-    const endStage = Math.min(currentPage * stagesPerPage, stageData.totalStages);
-    
-    // 현재 페이지의 스테이지 생성
     for (let i = startStage; i <= endStage; i++) {
-        const isCompleted = i <= stageData.completedStages;
         const isUnlocked = i <= stageData.completedStages + 1;
-        
-        // 템플릿 복제
-        const stageItem = stageTemplate.content.cloneNode(true).querySelector('.stage-item');
-        
-        // 스테이지 상태 설정
+        const stageItem = template.content.cloneNode(true).querySelector('.stage-item');
         stageItem.classList.add(isUnlocked ? 'completed' : 'locked');
-        stageItem.setAttribute('data-stage', i);
-        
-        // 스테이지 번호 설정
-        const stageNumber = stageItem.querySelector('.stage-number');
-        stageNumber.textContent = i;
-        
-        // 별점 설정 (완료된 스테이지만)
-        const stars = stageItem.querySelector('.stars');
-        if (isCompleted && stageData.stageScores[i]) {
-            stars.textContent = calculateStars(stageData.stageScores[i]);
-        } else {
-            stars.style.display = 'none';
-        }
-        
-        // 완료된 스테이지에만 클릭 이벤트 추가
+        stageItem.querySelector('.stage-number').textContent = i;
         if (isUnlocked) {
+            const score = stageData.stageScores[i] || 0;
+            const starsContainer = stageItem.querySelector('.stars');
+            if (starsContainer) {
+                let starsHTML = '';
+                if (score >= STAR_THRESHOLDS.THREE) starsHTML = '★★★';
+                else if (score >= STAR_THRESHOLDS.TWO) starsHTML = '★★☆';
+                else if (score >= STAR_THRESHOLDS.ONE) starsHTML = '★☆☆';
+                starsContainer.innerHTML = starsHTML;
+            }
             stageItem.addEventListener('click', () => {
-                selectStage(i);
+                state.gameMode = 'stage';
+                state.rows = 5;
+                state.cols = 10;
+                state.currentStageNumber = i;
+                stageDialog.close();
+                initGame();
             });
         }
-        
-        // 컨테이너에 추가
-        stagesContainer.appendChild(stageItem);
+        container.appendChild(stageItem);
     }
 }
 
-// 스테이지 선택 처리 함수
-function selectStage(stageNumber) {
-    // 현재 스테이지 번호 업데이트
-    currentStageNumber = stageNumber;
-    stageNumberElement.textContent = stageNumber;
-    console.log(`스테이지 ${stageNumber} 선택됨`);
-    
-    // 스테이지 번호에 맞는 시드 생성
-    const stageSeed = generateStageSeed(stageNumber);
-    
-    // 다이얼로그 닫기
-    stageDialog.close();
-    
-    // 선택한 스테이지로 게임 초기화 (시드 전달)
-    initGame(stageSeed);
-}
-
-// 터치 이벤트 핸들러 - 터치 이벤트를 포인터 이벤트로 변환
-function handleTouchStart(e) {
-    // 게임 영역 내에서만 스크롤 방지
-    const gridRect = gameGridElement.getBoundingClientRect();
-    if (e.touches.length > 0) {
-        const touch = e.touches[0];
-        // 게임 그리드 내부인 경우에만 스크롤 차단
-        if (
-            touch.clientX >= gridRect.left && 
-            touch.clientX <= gridRect.right && 
-            touch.clientY >= gridRect.top && 
-            touch.clientY <= gridRect.bottom
-        ) {
-            e.preventDefault();
-            
-            // 가상 포인터 이벤트 생성
-            const simulatedEvent = {
-                clientX: touch.clientX,
-                clientY: touch.clientY,
-                target: document.elementFromPoint(touch.clientX, touch.clientY) || e.target,
-                pointerType: POINTER_TYPE_TOUCH,
-                pointerId: 1  // 임의의 포인터 ID
-            };
-            
-            startSelection(simulatedEvent);
-        }
-    }
-}
-
-function handleTouchMove(e) {
-    // 선택 중일 때만 처리
-    if (isSelecting && e.touches.length > 0) {
-        const touch = e.touches[0];
-        
-        // 스크롤 차단을 위한 조건 체크 (선택 중인 경우만)
-        e.preventDefault();
-        
-        // 가상 포인터 이벤트 생성
-        const simulatedEvent = {
-            clientX: touch.clientX,
-            clientY: touch.clientY,
-            target: document.elementFromPoint(touch.clientX, touch.clientY) || e.target,
-            pointerType: POINTER_TYPE_TOUCH,
-            pointerId: 1  // 임의의 포인터 ID
-        };
-        
-        // 선택 업데이트 - 보드 밖이어도 계속 수행
-        updateSelection(simulatedEvent);
-    }
-}
-
-function handleTouchEnd(e) {
-    if (isSelecting) {
-        // 선택 중이었다면 스크롤 방지
-        e.preventDefault();
-        
-        // 가상 포인터 이벤트 생성
-        const simulatedEvent = {
-            pointerType: POINTER_TYPE_TOUCH,
-            target: e.target,
-            pointerId: 1  // 임의의 포인터 ID
-        };
-        
-        endSelection(simulatedEvent);
-    }
-}
-
-const DBG = {
-    backup: {
-        HINT_DELAY,
-        HINT_DURATION
-    },
-    hint() {
-        this.backup.HINT_DELAY = HINT_DELAY;
-        this.backup.HINT_DURATION = HINT_DURATION;
-        HINT_DELAY = 0;
-        HINT_DURATION = 100000;
-    },
-    hint_reset() {
-        HINT_DELAY = this.backup.HINT_DELAY;
-        HINT_DURATION = this.backup.HINT_DURATION;
-    },
-    gameover() {
-        // 테스트용 게임 종료 처리
-        checkStageCompletion('테스트용 게임 종료');
-    },
-    score(n) {
-        score = n;
-    }
-};
-if (IS_LOCALHOST) {
-    injectGlobal(DBG, 'DBG');
-}
-
-// 전역 변수에 일시 정지 관련 변수 추가
-// ... 기존 전역 변수들 ...
-let isPaused = false; // 게임 일시 정지 상태
-let pauseBtn = null; // 일시 정지 버튼
-let pauseMenuDialog = null; // 일시 정지 메뉴 다이얼로그
-let confirmationDialog = null; // 확인 다이얼로그
-let pendingAction = null; // 확인 대기 중인 작업
-let activeAnimations = []; // 활성 애니메이션 목록을 추적하기 위한 배열
-
-// 게임 일시 정지 함수
 function pauseGame() {
-    if (isPaused || timeLeft <= 0) return; // 이미 일시 정지 상태이거나 게임이 종료된 경우 무시
-    
-    isPaused = true;
-    
-    // 게임 타이머 일시 정지
-    gameTimer.pause();
-    
-    // 힌트 표시 타이머 일시 정지
-    hintDisplayTimer.pause();
-    
-    // 힌트 생성 타이머 일시 정지
+    if (state.isPaused) return;
+    state.isPaused = true;
+    if (gameTimer) gameTimer.pause();
     hintWaitTimer.pause();
-    
-    // 시간 깜빡임 애니메이션 제거
-    timeElement.classList.remove('time-warning', 'time-blink-10', 'time-blink-5', 'time-blink-1');
-    
-    // 게임 그리드에 일시 정지 시각적 효과 추가
-    gameGridElement.classList.add('paused');
-    
-    // 모든 셀 숫자 숨기기
-    Object.values(cellElements).forEach(cellElement => {
-        if (!cellElement.classList.contains('empty')) {
-            cellElement.dataset.originalText = cellElement.textContent;
-            cellElement.textContent = '';
+    hintDisplayTimer.pause();
+    ui.gameGridElement?.classList.add('paused');
+    Object.values(ui.cellElements).forEach(el => {
+        if (!el.classList.contains('empty')) {
+            el.dataset.val = el.textContent;
+            el.textContent = '';
         }
     });
-    
-    // 모든 애니메이션 중지
-    activeAnimations.forEach(id => {
-        cancelAnimationFrame(id);
-    });
-    activeAnimations = [];
 }
 
-// 게임 재개 함수
 function resumeGame() {
-    if (!isPaused) return; // 일시 정지 상태가 아닌 경우 무시
-    
-    isPaused = false;
-    
-    // 타이머 재개
-    if (timeLeft > 0) {
-        gameTimer.resume();
+    if (!state.isPaused) return;
+    state.isPaused = false;
+    if (gameTimer) gameTimer.resume();
+    // Only resume hints if not in Frenzy mode
+    if (state.gameMode !== 'frenzy') {
         hintWaitTimer.resume();
         hintDisplayTimer.resume();
     }
-    
-    // 모든 셀 숫자 복원
-    Object.values(cellElements).forEach(cellElement => {
-        if (cellElement.dataset.originalText) {
-            cellElement.textContent = cellElement.dataset.originalText;
-            delete cellElement.dataset.originalText;
+    ui.gameGridElement?.classList.remove('paused');
+    Object.values(ui.cellElements).forEach(el => {
+        if (el.dataset.val) {
+            el.textContent = el.dataset.val;
+            delete el.dataset.val;
         }
     });
-    
-    // 시간에 따라 깜빡임 효과 다시 적용
-    if (timeLeft <= 1) {
-        timeElement.classList.add('time-blink-1');
-    } else if (timeLeft <= 5) {
-        timeElement.classList.add('time-blink-5');
-    } else if (timeLeft <= 10) {
-        timeElement.classList.add('time-blink-10');
-    }
-    
-    // 게임 그리드에서 일시 정지 시각적 효과 제거
-    gameGridElement.classList.remove('paused');
 }
 
-// 확인 다이얼로그 표시 함수
-function showConfirmation(title, message) {
-    document.getElementById('confirmation-title').textContent = title;
-    document.getElementById('confirmation-message').textContent = message;
-    confirmationDialog.showModal();
-}
-
-
-// Timer 객체 생성 함수
-function createTimer(callback, delay) {
-    return new Timer(callback, delay);
-}
-
-
-// 타이머 디스플레이 폭발 애니메이션
-function explodeTimerDisplay(onComplete) {
-    console.log('=== 타이머 폭발 애니메이션 시작 ===');
-    
-    // 타이머 요소의 원래 내용 저장 (0.0)
-    const originalTime = timeElement.textContent;
-    console.log(`현재 타이머 값: ${originalTime}`);
-    
-    // 모든 인터랙션 비활성화
-    // 이미 isPaused를 사용하여 인터랙션을 제어하므로 임시로 일시정지 상태로 설정
-    const wasAlreadyPaused = isPaused;
-    isPaused = true;
-    
-    // 타이머 요소의 위치와 크기 정보 저장
-    const timerRect = timeElement.getBoundingClientRect();
-    
-    // 폭발할 숫자들을 담을 컨테이너 생성
-    const explodingContainer = document.createElement('div');
-    explodingContainer.style.position = 'absolute';
-    explodingContainer.style.left = `${timerRect.left}px`;
-    explodingContainer.style.top = `${timerRect.top}px`;
-    explodingContainer.style.width = `${timerRect.width}px`;
-    explodingContainer.style.height = `${timerRect.height}px`;
-    explodingContainer.style.fontSize = window.getComputedStyle(timeElement).fontSize;
-    explodingContainer.style.fontFamily = window.getComputedStyle(timeElement).fontFamily;
-    explodingContainer.style.fontWeight = window.getComputedStyle(timeElement).fontWeight;
-    explodingContainer.style.color = window.getComputedStyle(timeElement).color;
-    explodingContainer.style.display = 'flex';
-    explodingContainer.style.justifyContent = 'center';
-    explodingContainer.style.zIndex = '1000';
-    
-    // 원래의 타이머 숫자 숨기기
-    timeElement.style.visibility = 'hidden';
-    
-    // 문서에 컨테이너 추가
-    document.body.appendChild(explodingContainer);
-    
-    // 숫자 문자열을 각 문자로 분리 (0.0)
-    const characters = originalTime.split('');
-    
-    // 각 문자에 대한 요소 생성
-    const characterElements = characters.map(char => {
-        const charElement = document.createElement('div');
-        charElement.textContent = char;
-        charElement.style.display = 'inline-block';
-        charElement.style.position = 'relative';
-        explodingContainer.appendChild(charElement);
-        return charElement;
-    });
-    
-    // 모든 애니메이션 완료를 추적할 카운터
-    let completedAnimations = 0;
-    
-    // 각 문자에 물리 애니메이션 적용
-    characterElements.forEach(element => {
-        // 소수점은 작은 흔들림만 주고 빠르게 사라지게
-        const isDot = element.textContent === '.';
-        
-        // 물리 애니메이션 파라미터 설정
-        const physics = {
-            element: element,
-            // 각도: 45~135도 사이 (위쪽 방향)
-            angle: (45 + getRandom().next() * 90) * Math.PI / 180,
-            // 초기 속도: 200~300 픽셀/초
-            initialSpeed: 200 + getRandom().next() * 100,
-            // 회전 속도: -360~360도/초
-            rotationSpeed: -360 + getRandom().next() * 720,
-            // 중력 가속도: 980 픽셀/초^2 (물리학적 중력과 유사)
-            gravity: 980,
-            // 애니메이션 지속 시간: 0.8~1.2초
-            duration: 400 + getRandom().next() * 400,
-            // 타임스탬프 초기화
-            opacity: 1,
-            x: 0,
-            y: 0,
-            rotation: 0
-        };
-        
-        // 물리 애니메이션 시작
-        startPhysicsAnimation(physics, () => {
-            // 애니메이션 완료 카운트 증가
-            completedAnimations++;
-            
-            // 모든 애니메이션이 완료되면 정리 및 콜백 실행
-            if (completedAnimations === characterElements.length) {
-                // 컨테이너 제거
-                document.body.removeChild(explodingContainer);
-                
-                // 원래 타이머 요소 표시 (필요한 경우)
-                // timeElement.style.visibility = 'visible';
-                
-                // 원래 게임이 일시정지 상태가 아니었다면 일시정지 해제
-                isPaused = wasAlreadyPaused;
-                
-                // 콜백 실행
-                onComplete?.();
+// Worker 메시지 핸들러
+gameWorker.onmessage = function(e) {
+    const { type, payload } = e.data;
+    switch (type) {
+        case 'INIT_COMPLETE':
+            state.grid = payload.grid;
+            ui.renderGrid(window.innerWidth / window.innerHeight);
+            if (gameTimer) gameTimer.start();
+            // Only start hints if not in Frenzy mode
+            if (state.gameMode !== 'frenzy') {
+                hintWaitTimer.start();
             }
-        });
+            precomputeHints();
+            break;
+        case 'VALIDATION_RESULT':
+            handleValidationResult(payload);
+            break;
+        case 'HINTS_RESULT':
+            state.cachedHints = payload.hints;
+            if (state.cachedHints && state.cachedHints.length === 0) {
+                checkStageCompletion('가능한 조합이 없습니다.');
+            }
+            break;
+    }
+};
+
+function updateTimerUI() {
+    if (state.isPaused) return;
+    state.timeLeft = gameTimer ? Math.max(0, gameTimer.getRemainingTime() / 1000) : 0;
+    ui.updateUI();
+}
+
+function initGame() {
+    const isFrenzy = state.gameMode === 'frenzy';
+    const limit = isFrenzy ? 10 : TIME_LIMIT;
+    
+    initTimers(limit);
+    hintWaitTimer.reset();
+    hintDisplayTimer.reset();
+    
+    if (ui.gameOverElement) ui.gameOverElement.style.display = 'none';
+    state.score = 0;
+    state.isPaused = false;
+    state.timeLeft = limit;
+    ui.updateUI();
+    
+    if (ui.gameGridElement) ui.gameGridElement.classList.remove('paused');
+    ui.setGridCSS();
+    
+    gameWorker.postMessage({
+        type: 'INIT',
+        payload: {
+            rows: state.rows,
+            cols: state.cols,
+            stageNumber: isFrenzy ? 7 : state.currentStageNumber,
+            seed: generateStageSeed(isFrenzy ? 999 : state.currentStageNumber)
+        }
     });
 }
 
-// 그리드 셀 폭발 애니메이션
-function explodeCellsGrid(onComplete) {
-    console.log('=== 그리드 셀 폭발 애니메이션 시작 ===');
-    
-    // 모든 인터랙션 비활성화
-    const wasAlreadyPaused = isPaused;
-    isPaused = true;
-    
-    // 현재 그리드의 모든 셀 요소 수집
-    const cellElements = document.querySelectorAll('.cell:not(.empty)');
-    console.log(`애니메이션 적용할 셀 수: ${cellElements.length}`);
-    
-    if (cellElements.length === 0) {
-        // 셀이 없으면 즉시 완료
-        isPaused = wasAlreadyPaused;
-        if (onComplete && typeof onComplete === 'function') {
-            onComplete();
+function handleValidationResult(result) {
+    const { isValid, updates, pointsEarned } = result;
+    if (isValid) {
+        revealUpdatesWithAnimation(updates);
+        updates.forEach(upd => {
+            state.grid[upd.row][upd.col] = {
+                value: upd.newValue,
+                layerDepth: upd.newLayerDepth,
+                color: upd.newColor
+            };
+        });
+        state.score += pointsEarned;
+        
+        if (state.gameMode === 'frenzy') {
+            if (gameTimer) {
+                gameTimer.reset();
+                gameTimer.start();
+            }
         }
+
+        ui.updateUI();
+        state.lastClearTime = Date.now();
+        hideHint();
+        precomputeHints();
+    } else {
+        clearSelection();
+    }
+}
+
+function revealUpdatesWithAnimation(updates) {
+    const sortedUpdates = [...updates].sort((a, b) => (a.row !== b.row) ? a.row - b.row : a.col - b.col);
+    sortedUpdates.forEach((upd, index) => {
+        setTimeout(() => {
+            const cellEl = ui.cellElements[`${upd.row}-${upd.col}`];
+            if (!cellEl) return;
+            
+            const rect = cellEl.getBoundingClientRect();
+            const clone = cellEl.cloneNode(true);
+            Object.assign(clone.style, {
+                position: 'fixed',
+                left: `${rect.left}px`,
+                top: `${rect.top}px`,
+                zIndex: '1000',
+                pointerEvents: 'none'
+            });
+            clone.classList.add('falling');
+            document.body.appendChild(clone);
+
+            cellEl.textContent = upd.newValue || '';
+            cellEl.classList.remove('orange-layer', 'blue-layer', 'empty');
+            if (upd.newValue > 0) {
+                cellEl.classList.add(`${upd.newColor}-layer`);
+            } else {
+                cellEl.classList.add('empty');
+            }
+
+            const physics = {
+                angle: (45 + Math.random() * 90) * Math.PI / 180,
+                initialSpeed: 200 + Math.random() * 100,
+                rotationSpeed: -360 + Math.random() * 720,
+                gravity: 980,
+                duration: 400 + Math.random() * 400,
+                startTime: null,
+                x: 0, y: 0, rotation: 0, opacity: 1, element: clone
+            };
+            startPhysicsAnimation(physics, () => clone.remove());
+        }, index * 50);
+    });
+    clearSelection();
+}
+
+function precomputeHints() {
+    gameWorker.postMessage({ type: 'GET_HINTS' });
+}
+
+function showHint() {
+    // Disable hints completely in Frenzy mode
+    if (state.gameMode === 'frenzy') return;
+    if (state.timeLeft <= 0 || state.isPaused) return;
+    
+    hideHint();
+    
+    const hints = state.cachedHints || [];
+    if (hints.length === 0) return;
+    
+    let index;
+    do {
+        index = Math.floor(Math.random() * hints.length);
+    } while (index === state.lastShownHintIndex && hints.length > 1);
+    
+    state.currentHint = hints[index];
+    state.lastShownHintIndex = index;
+    
+    state.currentHint.forEach(cell => {
+        const el = ui.cellElements[`${cell.row}-${cell.col}`];
+        if (el) el.classList.add('hint');
+    });
+    state.isHintVisible = true;
+}
+
+function hideHint() {
+    document.querySelectorAll('.cell.hint').forEach(el => el.classList.remove('hint'));
+    state.isHintVisible = false;
+}
+
+function checkStageCompletion(message) {
+    if (state.gameMode === 'frenzy') {
+        if (state.score > state.frenzyHighScore) {
+            state.frenzyHighScore = state.score;
+            stageData.saveToStorage();
+            message = `New Frenzy High Score: ${state.score}!`;
+        } else {
+            message = `Frenzy Over! Score: ${state.score} (High: ${state.frenzyHighScore})`;
+        }
+        endGame(message, true);
         return;
     }
-    
-    // 모든 애니메이션 완료를 추적할 카운터
-    let completedAnimations = 0;
-    const totalAnimations = cellElements.length;
-    
-    // 정규 분포 파라미터 설정
-    const MEAN_DELAY = 1000; // 평균 지연 시간 (ms)
-    const STD_DEVIATION = 500; // 표준 편차 (ms)
-    const MIN_DELAY = 0; // 최소 지연 시간
-    const MAX_DELAY = 2000; // 최대 지연 시간
-    
-    // 정규 분포 난수 생성 (Box-Muller 변환 사용)
-    function getNormalRandom(mean, stdDev) {
-        // Box-Muller 변환을 사용한 정규 분포 난수 생성
-        const u1 = Math.random();
-        const u2 = Math.random();
-        
-        // 표준 정규 분포 난수 생성 (평균 0, 표준편차 1)
-        const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-        
-        // 원하는 평균과 표준편차로 변환
-        return mean + z0 * stdDev;
+
+    if (state.score < 50) {
+        endGame(message);
+        return;
     }
-    
-    // 난수 값을 범위 내로 제한하는 함수
-    function clamp(value, min, max) {
-        return Math.max(min, Math.min(max, value));
-    }
-    
-    // 모든 셀에 대해 정규 분포된 지연 후 물리 애니메이션 적용
-    cellElements.forEach(element => {
-        // 정규 분포 지연 시간 생성 및 범위 제한
-        const delay = clamp(getNormalRandom(MEAN_DELAY, STD_DEVIATION), MIN_DELAY, MAX_DELAY);
-        
-        // 지연 후 애니메이션 시작
-        setTimeout(() => {
-            // 물리 애니메이션 파라미터
-            const physics = {
-                // 각도: 45~135도 사이 (위쪽 방향)
-                angle: (45 + getRandom().next() * 90) * Math.PI / 180,
-                // 초기 속도: 200~300 픽셀/초
-                initialSpeed: 200 + getRandom().next() * 100,
-                // 회전 속도: -360~360도/초
-                rotationSpeed: -360 + getRandom().next() * 720,
-                // 중력 가속도: 980 픽셀/초^2 (물리학적 중력과 유사)
-                gravity: 980,
-                // 애니메이션 지속 시간: 0.8~1.2초
-                duration: 400 + getRandom().next() * 400,
-                // 타임스탬프 초기화
-                startTime: null,
-                // 위치 및 회전 추적
-                x: 0,
-                y: 0,
-                rotation: 0,
-                opacity: 1,
-                element: element
-            };
-            
-            // 애니메이션 시작 전 원래 셀의 색상과 내용 복사
-            const cellRect = element.getBoundingClientRect();
-            const cellStyle = window.getComputedStyle(element);
-            
-            // 원래 셀 숨기기
-            element.style.visibility = 'hidden';
-            
-            // 새 요소 생성하여 원래 셀을 복제
-            const cloneElement = document.createElement('div');
-            cloneElement.className = element.className;
-            cloneElement.innerHTML = element.innerHTML;
-            cloneElement.style.position = 'absolute';
-            cloneElement.style.left = `${cellRect.left}px`;
-            cloneElement.style.top = `${cellRect.top}px`;
-            cloneElement.style.width = `${cellRect.width}px`;
-            cloneElement.style.height = `${cellRect.height}px`;
-            cloneElement.style.zIndex = '999';
-            cloneElement.style.borderRadius = cellStyle.borderRadius;
-            cloneElement.style.backgroundColor = cellStyle.backgroundColor;
-            
-            // 문서에 복제 요소 추가
-            document.body.appendChild(cloneElement);
-            
-            // 물리 애니메이션에는 복제된 요소 사용
-            physics.element = cloneElement;
-            
-            // 애니메이션 시작
-            startPhysicsAnimation(physics, () => {
-                // 복제 요소 제거
-                if (document.body.contains(cloneElement)) {
-                    document.body.removeChild(cloneElement);
-                }
-                
-                // 애니메이션 완료 카운트 증가
-                completedAnimations++;
-                
-                // 모든 애니메이션 완료 확인
-                if (completedAnimations === totalAnimations) {
-                    console.log('모든 셀 애니메이션 완료');
-                    
-                    // 원래 셀 다시 표시
-                    cellElements.forEach(cell => {
-                        cell.style.visibility = 'visible';
-                        timeElement.style.visibility = 'visible';
-                    });
-                    
-                    // 일시정지 상태 복원
-                    isPaused = wasAlreadyPaused;
-                    
-                    // 콜백 실행
-                    if (onComplete && typeof onComplete === 'function') {
-                        onComplete();
-                    }
-                }
-            });
-        }, delay);
-    });
+    stageData.clearStage(state.currentStageNumber, state.score);
+    if (ui.stageClearInfoElement) ui.stageClearInfoElement.style.display = 'block';
+    if (ui.nextStageBtn) ui.nextStageBtn.style.display = 'block';
+    endGame(message);
 }
 
-/**
- * 스테이지 완료 여부를 확인하고 적절한 처리를 수행하는 함수
- * @param {string} message - 표시할 메시지
- */
-function checkStageCompletion(message) {
-    // 점수가 50점 이상이면 스테이지 클리어로 처리
-    if (score >= 50) {
-        // 스테이지 클리어 처리
-        stageData.clearStage(currentStageNumber, score);
+function endGame(message, isFrenzy = false) {
+    if (gameTimer) gameTimer.reset();
+    hintWaitTimer.reset();
+    hintDisplayTimer.reset();
+    hideHint();
+    clearSelection();
+    if (ui.gameOverElement) {
+        ui.gameOverElement.style.display = 'flex';
+        const msgEl = document.getElementById('game-over-message') || document.getElementById('result-message');
+        if (msgEl) msgEl.textContent = message;
         
-        // 게임 오버 화면 표시
-        const gameOverElement = document.getElementById('game-over');
-        if (gameOverElement) {
-            // 메시지 설정
-            const messageElement = document.getElementById('game-over-message');
-            if (messageElement) {
-                messageElement.textContent = message;
-            }
-            
-            // 스테이지 클리어 정보 표시
-            const stageClearInfoElement = document.getElementById('stage-clear-info');
-            if (stageClearInfoElement) {
-                stageClearInfoElement.style.display = 'block';
-                
-                // '다음 스테이지' 버튼 표시
-                const nextStageBtn = document.getElementById('next-stage-btn');
-                if (nextStageBtn) {
-                    nextStageBtn.style.display = 'block';
+        if (isFrenzy) {
+           if (ui.stageClearInfoElement) ui.stageClearInfoElement.style.display = 'none';
+           if (ui.nextStageBtn) ui.nextStageBtn.style.display = 'none';
+        } else {
+            if (state.score >= STAR_THRESHOLDS.ONE) {
+                if (ui.stageStarsElement) {
+                    let starsHTML = '';
+                    if (state.score >= STAR_THRESHOLDS.THREE) starsHTML = '★★★';
+                    else if (state.score >= STAR_THRESHOLDS.TWO) starsHTML = '★★☆';
+                    else starsHTML = '★☆☆';
+                    ui.stageStarsElement.innerHTML = starsHTML;
                 }
-                
-                // 별점 및 점수 요소 가져오기
-                const starsElement = document.querySelector('.stage-stars');
-                const scoreDisplayElement = document.querySelector('.score-display');
-                
-                if (starsElement && scoreDisplayElement) {
-                    // 초기 상태: 0점, 별 없음
-                    scoreDisplayElement.textContent = '0';
-                    starsElement.textContent = '☆☆☆';
-                    
-                    // 애니메이션 시작 시간
-                    const startTime = performance.now();
-                    // 애니메이션 지속 시간 (밀리초)
-                    const duration = 3000;
-                    
-                    // 애니메이션 함수
-                    function animateScoreAndStars(currentTime) {
-                        // 경과 시간 계산 (0~1 범위)
-                        const elapsed = Math.min(1, (currentTime - startTime) / duration);
-                        
-                        // 이징 함수 적용 (부드러운 시작과 종료)
-                        const eased = elapsed;
-                        
-                        // 현재 점수 계산
-                        const currentScore = Math.floor(eased * score);
-                        
-                        // 점수 업데이트
-                        scoreDisplayElement.textContent = currentScore;
-                        
-                        // 이전 별 상태 저장
-                        const previousStars = starsElement.textContent;
-                        
-                        // 별 업데이트
-                        let newStars;
-                        if (currentScore >= 150) {
-                            newStars = '★★★';
-                        } else if (currentScore >= 100) {
-                            newStars = '★★☆';
-                        } else if (currentScore >= 50) {
-                            newStars = '★☆☆';
-                        } else {
-                            newStars = '☆☆☆';
-                        }
-                        
-                        // 별 상태가 변경되었는지 확인
-                        if (newStars !== previousStars) {
-                            // 별 변화에 애니메이션 효과 적용
-                            starsElement.innerHTML = ''; // 기존 내용 제거
-                            
-                            // 새로운 별 추가 (각 별에 애니메이션 적용)
-                            for (let i = 0; i < newStars.length; i++) {
-                                const starSpan = document.createElement('span');
-                                starSpan.className = 'star-pop';
-                                starSpan.textContent = newStars[i];
-                                starsElement.appendChild(starSpan);
-                            }
-                        }
-                        
-                        // 애니메이션 완료 여부 확인
-                        if (elapsed < 1) {
-                            // 애니메이션 계속
-                            requestAnimationFrame(animateScoreAndStars);
-                        }
-                    }
-                    
-                    // 애니메이션 시작
-                    requestAnimationFrame(animateScoreAndStars);
-                    
-                    // 게임 오버 컨텐츠에 애니메이션 클래스 추가
-                    const gameOverContent = document.querySelector('.game-over-content');
-                    if (gameOverContent) {
-                        gameOverContent.classList.add('animating');
-                        // 애니메이션 완료 후 클래스 제거
-                        setTimeout(() => {
-                            gameOverContent.classList.remove('animating');
-                        }, duration);
-                    }
-                }
+            } else if (ui.stageStarsElement) {
+                ui.stageStarsElement.innerHTML = '';
             }
-            
-            gameOverElement.style.display = 'flex';
         }
-        
-        // 게임 타이머 및 힌트 타이머 정리
-        gameTimer.reset();
-        hintWaitTimer.reset();
-        hintDisplayTimer.reset();
-        
-        // 선택 영역 초기화
-        clearSelection();
-        
-        // 추가로 선택 상태 변수 초기화
-        isSelecting = false;
-        selectionStartCell = null;
-        selectionEndCell = null;
-        selectedCells = [];
-        
-        // 모든 셀에서 선택 클래스 제거 (추가 안전장치)
-        document.querySelectorAll('.cell.selected').forEach(cell => {
-            cell.classList.remove('selected');
-        });
-        
-        // falling 클래스를 가진 모든 요소 제거 (애니메이션 도중 남은 요소들)
-        document.querySelectorAll('.cell.falling').forEach(cell => {
-            if (cell.parentNode) {
-                cell.parentNode.removeChild(cell);
-            }
-        });
-        
-        // 진행 중인 애니메이션 중지
-        activeAnimations.forEach(id => {
-            cancelAnimationFrame(id);
-        });
-    } else {
-        // 일반 게임 종료 처리
-        endGame(message);
     }
 }
+
+function explodeTimerDisplay(onComplete) {
+    onComplete();
+}
+
+// --- Initialization ---
+document.addEventListener('DOMContentLoaded', () => {
+    ui.initElements();
+    ui.setGridCSS();
+    stageData.loadFromStorage();
+    
+    // Pointer Events
+    ui.gameGridElement?.addEventListener('pointerdown', (e) => {
+        if (state.isPaused || state.timeLeft <= 0) return;
+        state.isSelecting = true;
+        state.selectionStartCell = getCellCoordinatesFromPosition(e.clientX, e.clientY, window.innerWidth / window.innerHeight);
+        state.selectionEndCell = state.selectionStartCell;
+        selectCellsInRange(state.selectionStartCell, state.selectionEndCell);
+    });
+
+    document.addEventListener('pointermove', (e) => {
+        if (!state.isSelecting) return;
+        const current = getCellCoordinatesFromPosition(e.clientX, e.clientY, window.innerWidth / window.innerHeight);
+        if (!state.selectionEndCell || current.row !== state.selectionEndCell.row || current.col !== state.selectionEndCell.col) {
+            state.selectionEndCell = current;
+            selectCellsInRange(state.selectionStartCell, state.selectionEndCell);
+        }
+    });
+
+    document.addEventListener('pointerup', () => {
+        if (!state.isSelecting) return;
+        state.isSelecting = false;
+        if (state.selectedCells.length > 0) {
+            gameWorker.postMessage({
+                type: 'VALIDATE_SELECTION',
+                payload: {
+                    cells: state.selectedCells.map(c => ({ row: c.row, col: c.col })),
+                    currentHint: state.currentHint,
+                    isHintVisible: state.isHintVisible
+                }
+            });
+        } else {
+            clearSelection();
+        }
+    });
+
+    // UI Buttons
+    ui.restartBtn?.addEventListener('click', () => initGame());
+    ui.nextStageBtn?.addEventListener('click', () => {
+        state.currentStageNumber++;
+        initGame();
+    });
+    ui.stageSelectBtn?.addEventListener('click', () => {
+        showStageSelection();
+    });
+
+    document.getElementById('close-stage-selection')?.addEventListener('click', () => {
+        stageDialog.close();
+        showModeSelection(); // Return to mode selection when closed
+    });
+    
+    document.getElementById('pause-btn')?.addEventListener('click', () => {
+        pauseGame();
+        pauseMenuDialog?.showModal();
+    });
+    
+    document.getElementById('continue-btn')?.addEventListener('click', () => {
+        pauseMenuDialog?.close();
+        resumeGame();
+    });
+    
+    document.getElementById('restart-from-pause-btn')?.addEventListener('click', () => {
+        pauseMenuDialog?.close();
+        pendingAction = 'restart';
+        confirmationDialog?.showModal();
+    });
+    
+    document.getElementById('give-up-btn')?.addEventListener('click', () => {
+        pauseMenuDialog?.close();
+        pendingAction = 'giveup';
+        confirmationDialog?.showModal();
+    });
+
+    document.getElementById('confirm-no-btn')?.addEventListener('click', () => {
+        confirmationDialog?.close();
+        pauseMenuDialog?.showModal();
+    });
+
+    document.getElementById('confirm-yes-btn')?.addEventListener('click', () => {
+        confirmationDialog?.close();
+        if (pendingAction === 'restart') {
+            initGame();
+        } else if (pendingAction === 'giveup') {
+            showModeSelection();
+        }
+        pendingAction = null;
+    });
+
+    // Mode Selection Buttons
+    document.getElementById('mode-stage-btn')?.addEventListener('click', () => {
+        modeSelectionDialog.close();
+        showStageSelection();
+    });
+
+    document.getElementById('mode-frenzy-btn')?.addEventListener('click', () => {
+        modeSelectionDialog.close();
+        state.gameMode = 'frenzy';
+        state.rows = 10;
+        state.cols = 20;
+        state.currentStageNumber = 7; 
+        initGame();
+    });
+
+    // Pagination Listeners
+    document.getElementById('prev-page')?.addEventListener('click', () => {
+        if (stageData.currentPage > 1) {
+            stageData.currentPage--;
+            generateStages();
+        }
+    });
+
+    document.getElementById('next-page')?.addEventListener('click', () => {
+        const totalPages = Math.ceil(stageData.totalStages / stageData.stagesPerPage);
+        if (stageData.currentPage < totalPages) {
+            stageData.currentPage++;
+            generateStages();
+        }
+    });
+
+    // Initial Start
+    showModeSelection();
+});
