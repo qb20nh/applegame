@@ -47,7 +47,9 @@
     <!-- 스테이지 선택 다이얼로그 -->
     <dialog id="stage-selection-dialog" class="stage-dialog">
         <div class="dialog-content">
+            <button id="close-stage-selection" class="dialog-close-btn" aria-label="닫기">✕</button>
             <h2>스테이지 선택</h2>
+            <p id="stage-selection-notice" class="stage-selection-notice" hidden></p>
             <div class="page-info">
                 <span id="page-display">페이지 1/10</span>
             </div>
@@ -60,9 +62,6 @@
                     <!-- 페이지 번호는 JavaScript로 동적 생성 -->
                 </div>
                 <button id="next-page" class="page-btn">&gt;</button>
-            </div>
-            <div class="dialog-buttons">
-                <button id="close-stage-selection" class="dialog-close-btn">닫기</button>
             </div>
         </div>
     </dialog>
