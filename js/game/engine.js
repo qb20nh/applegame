@@ -3,6 +3,17 @@ import * as patterns from './patterns.js';
 
 export const COLORS = ['orange', 'blue'];
 export const TARGET_SUM = 10;
+const SKEWED_DIGIT_WEIGHTS = [
+    0.1723602995873028,
+    0.1399745918951814,
+    0.1200313160176022,
+    0.1074289990042504,
+    0.09933762576923556,
+    0.09415776255794744,
+    0.09087548000721379,
+    0.08854629768368405,
+    0.08728762747758218
+];
 
 export class GameEngine {
     constructor(rows, cols) {
@@ -34,7 +45,7 @@ export class GameEngine {
             for (let j = 0; j < this.cols; j++) {
                 const isBlue = this.getColor(i, j);
                 row.push({
-                    value: this.random.nextInt(1, 9),
+                    value: this.getSkewedDigit(),
                     layerDepth: isBlue ? 1 : 0,
                     color: isBlue ? COLORS[1] : COLORS[0]
                 });
@@ -180,7 +191,7 @@ export class GameEngine {
         // Valid! Calculate new values
         const hintsResult = this.findHints();
         const hintsCount = hintsResult ? hintsResult.length : 0;
-        const useBenfordProbability = 1.0 / Math.sqrt(Math.max(1, hintsCount));
+        const useSkewedDigitProbability = 1.0 / Math.sqrt(Math.max(1, hintsCount));
         
         const updates = selectedCellCoords.map(coord => {
             const cell = this.grid[coord.row][coord.col];
@@ -188,8 +199,8 @@ export class GameEngine {
             const newColor = COLORS[newLayerDepth % COLORS.length];
             
             let newValue;
-            if (this.random.next() < useBenfordProbability) {
-                newValue = this.random.nextInt(1, 9);
+            if (this.random.next() < useSkewedDigitProbability) {
+                newValue = this.getSkewedDigit();
             } else {
                 const position = coord.row * this.cols + coord.col;
                 newValue = (pseudoPermutation(200*9, position, 4, newLayerDepth) % 9) + 1;
@@ -208,5 +219,15 @@ export class GameEngine {
         this.buildAllPrefixSums();
         
         return { isValid: true, sum, updates, pointsEarned };
+    }
+
+    getSkewedDigit() {
+        const roll = this.random.next();
+        let cumulative = 0;
+        for (let i = 0; i < SKEWED_DIGIT_WEIGHTS.length; i++) {
+            cumulative += SKEWED_DIGIT_WEIGHTS[i];
+            if (roll < cumulative) return i + 1;
+        }
+        return 9;
     }
 }
