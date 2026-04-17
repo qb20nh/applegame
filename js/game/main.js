@@ -387,6 +387,7 @@ function resumeGame() {
             delete el.dataset.val;
         }
     });
+    syncGridVisualStateAfterRender();
 }
 
 function syncGridVisualStateAfterRender() {
@@ -398,16 +399,15 @@ function syncGridVisualStateAfterRender() {
                 el.textContent = '';
             }
         });
-        return;
+    } else {
+        ui.gameGridElement?.classList.remove('paused');
+        Object.values(ui.cellElements).forEach(el => {
+            if (el.dataset.val) {
+                el.textContent = el.dataset.val;
+                delete el.dataset.val;
+            }
+        });
     }
-
-    ui.gameGridElement?.classList.remove('paused');
-    Object.values(ui.cellElements).forEach(el => {
-        if (el.dataset.val) {
-            el.textContent = el.dataset.val;
-            delete el.dataset.val;
-        }
-    });
 
     if (state.isSelecting && state.selectionStartCell && state.selectionEndCell) {
         selectCellsInRange(state.selectionStartCell, state.selectionEndCell);
