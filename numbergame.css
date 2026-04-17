@@ -389,12 +389,17 @@ h1 {
 
 /* 스테이지 선택 다이얼로그 스타일 */
 .stage-dialog {
+    position: fixed;
+    inset: 0;
     width: 100%;
     height: 100%;
     margin: 0;
     padding: 0;
     border: none;
     background-color: transparent;
+    max-width: none;
+    max-height: none;
+    overflow: hidden;
 }
 
 .stage-dialog:modal {
@@ -402,6 +407,7 @@ h1 {
     max-height: 100dvh;
     width: 100dvw;
     height: 100dvh;
+    margin: 0;
 }
 
 .stage-dialog::backdrop {
@@ -411,9 +417,12 @@ h1 {
 .dialog-content {
     background-color: #f0f0f0;
     padding: 20px;
-    max-height: 100dvh;
-    overflow-y: auto;
+    height: 100dvh;
+    overflow: hidden;
     position: relative;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
 }
 
 .dialog-content h2 {
@@ -428,7 +437,8 @@ h1 {
     grid-template-columns: repeat(10, 1fr);
     gap: 8px;
     margin-bottom: 20px;
-    max-height: 80dvh;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
 }
 
@@ -526,10 +536,6 @@ h1 {
 }
 
 @media (max-width: 768px) {
-    .stage-dialog {
-        width: 95%;
-    }
-
     .dialog-content {
         padding: 15px;
     }
