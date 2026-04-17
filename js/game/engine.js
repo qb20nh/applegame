@@ -14,6 +14,32 @@ const SKEWED_DIGIT_WEIGHTS = [
     0.08854629768368405,
     0.08728762747758218
 ];
+const DIGIT_MIN = 1;
+const DIGIT_MAX = 9;
+const WEIGHT_SUM_EPSILON = 1e-12;
+
+const NORMALIZED_SKEWED_DIGIT_WEIGHTS = (() => {
+    if (SKEWED_DIGIT_WEIGHTS.length !== DIGIT_MAX) {
+        throw new Error(`SKEWED_DIGIT_WEIGHTS must contain ${DIGIT_MAX} values.`);
+    }
+
+    const weightSum = SKEWED_DIGIT_WEIGHTS.reduce((sum, weight) => {
+        if (!Number.isFinite(weight) || weight < 0) {
+            throw new Error(`Invalid skewed digit weight: ${weight}`);
+        }
+        return sum + weight;
+    }, 0);
+
+    if (weightSum <= 0) {
+        throw new Error('SKEWED_DIGIT_WEIGHTS sum must be greater than 0.');
+    }
+
+    if (Math.abs(1 - weightSum) > WEIGHT_SUM_EPSILON) {
+        console.warn(`SKEWED_DIGIT_WEIGHTS sum is ${weightSum}; normalizing to 1.`);
+    }
+
+    return SKEWED_DIGIT_WEIGHTS.map(weight => weight / weightSum);
+})();
 
 export class GameEngine {
     constructor(rows, cols) {
@@ -224,10 +250,12 @@ export class GameEngine {
     getSkewedDigit() {
         const roll = this.random.next();
         let cumulative = 0;
-        for (let i = 0; i < SKEWED_DIGIT_WEIGHTS.length; i++) {
-            cumulative += SKEWED_DIGIT_WEIGHTS[i];
-            if (roll < cumulative) return i + 1;
+        for (let i = 0; i < NORMALIZED_SKEWED_DIGIT_WEIGHTS.length; i++) {
+            cumulative += NORMALIZED_SKEWED_DIGIT_WEIGHTS[i];
+            if (i === NORMALIZED_SKEWED_DIGIT_WEIGHTS.length - 1 || roll < cumulative) {
+                return i + DIGIT_MIN;
+            }
         }
-        return 9;
+        return DIGIT_MAX;
     }
 }
