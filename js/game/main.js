@@ -335,7 +335,7 @@ function generateStages() {
                     scoreLabel.textContent = score > 0 ? `🏆${score}` : '-';
                     starsContainer.appendChild(scoreLabel);
                 } else {
-                    if (score > 0) {
+                    if (score >= STAR_THRESHOLDS.ONE) {
                         const stars = document.createElement('span');
                         if (score >= STAR_THRESHOLDS.THREE) stars.textContent = '★★★';
                         else if (score >= STAR_THRESHOLDS.TWO) stars.textContent = '★★☆';
