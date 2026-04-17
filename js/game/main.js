@@ -157,21 +157,32 @@ hintWaitTimer.then(hintDisplayTimer).then(hintWaitTimer);
 const stageData = {
     totalStages: 1000,
     completedStages: 0,
-    stageScores: {},
+    campaignStageScores: {},
+    zenStageScores: {},
     currentPage: 1,
     stagesPerPage: 100,
     loadFromStorage() {
         const stored = localStorage.getItem('stageData');
         this.completedStages = 0;
-        this.stageScores = {};
+        this.campaignStageScores = {};
+        this.zenStageScores = {};
         state.frenzyHighScore = 0;
         if (stored) {
             try {
                 const parsed = JSON.parse(stored);
                 this.completedStages = Math.max(0, Math.floor(Number(parsed.completedStages) || 0));
-                const rawScores = parsed.stageScores && typeof parsed.stageScores === 'object' ? parsed.stageScores : {};
-                this.stageScores = Object.fromEntries(
-                    Object.entries(rawScores).map(([stage, score]) => [stage, normalizeScore(score)])
+                const campaignRawScores = parsed.campaignStageScores && typeof parsed.campaignStageScores === 'object'
+                    ? parsed.campaignStageScores
+                    : (parsed.stageScores && typeof parsed.stageScores === 'object' ? parsed.stageScores : {});
+                const zenRawScores = parsed.zenStageScores && typeof parsed.zenStageScores === 'object'
+                    ? parsed.zenStageScores
+                    : {};
+
+                this.campaignStageScores = Object.fromEntries(
+                    Object.entries(campaignRawScores).map(([stage, score]) => [stage, normalizeScore(score)])
+                );
+                this.zenStageScores = Object.fromEntries(
+                    Object.entries(zenRawScores).map(([stage, score]) => [stage, normalizeScore(score)])
                 );
                 state.frenzyHighScore = normalizeScore(parsed.frenzyHighScore);
             } catch (e) { console.error(e); }
@@ -180,15 +191,18 @@ const stageData = {
     saveToStorage() {
         localStorage.setItem('stageData', JSON.stringify({
             completedStages: this.completedStages,
-            stageScores: this.stageScores,
+            campaignStageScores: this.campaignStageScores,
+            zenStageScores: this.zenStageScores,
             frenzyHighScore: state.frenzyHighScore
         }));
     },
-    recordStageScore(stageNumber, score) {
+    recordStageScore(stageNumber, score, mode = 'stage') {
         const normalizedScore = normalizeScore(score);
-        const currentBest = normalizeScore(this.stageScores[stageNumber]);
+        const isZen = mode === 'zen';
+        const scoreTable = isZen ? this.zenStageScores : this.campaignStageScores;
+        const currentBest = normalizeScore(scoreTable[stageNumber]);
         if (normalizedScore > currentBest) {
-            this.stageScores[stageNumber] = normalizedScore;
+            scoreTable[stageNumber] = normalizedScore;
         }
         this.saveToStorage();
     },
@@ -234,11 +248,11 @@ function showModeSelection() {
 
 function showStageSelection() {
     stageData.currentPage = 1;
-    if (isZenMode() && stageData.completedStages < 1) {
-        alert('먼저 캠페인에서 최소 1개 스테이지를 클리어해야 젠 모드를 플레이할 수 있어요.');
-        showModeSelection();
-        return;
-    }
+    if (stageDialog) stageDialog.scrollTop = 0;
+    const dialogContent = stageDialog?.querySelector('.dialog-content');
+    if (dialogContent) dialogContent.scrollTop = 0;
+    const stageContainer = stageDialog?.querySelector('.stages-container');
+    if (stageContainer) stageContainer.scrollTop = 0;
     generateStages();
     stageDialog?.showModal();
 }
@@ -248,6 +262,9 @@ function generateStages() {
     const template = document.getElementById('stage-template');
     const pageDisplay = document.getElementById('page-display');
     const pageNumbersContainer = document.querySelector('.page-numbers');
+    const pageInfo = document.querySelector('.page-info');
+    const pagination = document.querySelector('.pagination');
+    const noticeElement = document.getElementById('stage-selection-notice');
     
     if (!container || !template) return;
     
@@ -259,6 +276,25 @@ function generateStages() {
     if (pageDisplay) {
         pageDisplay.textContent = `페이지 ${stageData.currentPage} / ${totalPages}`;
     }
+
+    if (noticeElement) {
+        noticeElement.hidden = true;
+        noticeElement.textContent = '';
+    }
+
+    const isZen = isZenMode();
+    if (isZen && stageData.completedStages < 1) {
+        if (pageInfo) pageInfo.style.display = 'none';
+        if (pagination) pagination.style.display = 'none';
+        if (noticeElement) {
+            noticeElement.hidden = false;
+            noticeElement.textContent = '젠 모드를 시작하려면 캠페인에서 최소 1개 스테이지를 클리어하세요.';
+        }
+        return;
+    }
+
+    if (pageInfo) pageInfo.style.display = '';
+    if (pagination) pagination.style.display = '';
 
     if (pageNumbersContainer) {
         pageNumbersContainer.innerHTML = '';
@@ -281,28 +317,30 @@ function generateStages() {
         }
     }
     
-    const isZen = isZenMode();
     for (let i = startStage; i <= endStage; i++) {
         const isUnlocked = isZen ? i <= stageData.completedStages : i <= stageData.completedStages + 1;
         const stageItem = template.content.cloneNode(true).querySelector('.stage-item');
         stageItem.classList.add(isUnlocked ? 'completed' : 'locked');
         stageItem.querySelector('.stage-number').textContent = i;
         if (isUnlocked) {
-            const score = normalizeScore(stageData.stageScores[i]);
+            const score = normalizeScore(
+                isZen ? stageData.zenStageScores[i] : stageData.campaignStageScores[i]
+            );
             const starsContainer = stageItem.querySelector('.stars');
             if (starsContainer) {
                 starsContainer.textContent = '';
-                const stars = document.createElement('span');
-                if (score >= STAR_THRESHOLDS.THREE) stars.textContent = '★★★';
-                else if (score >= STAR_THRESHOLDS.TWO) stars.textContent = '★★☆';
-                else if (score >= STAR_THRESHOLDS.ONE) stars.textContent = '★☆☆';
-                starsContainer.appendChild(stars);
-
-                if (score > 0) {
+                if (isZen) {
                     const scoreLabel = document.createElement('span');
                     scoreLabel.className = 'best-score';
-                    scoreLabel.textContent = `🏆${score}`;
+                    scoreLabel.textContent = score > 0 ? `🏆${score}` : '-';
                     starsContainer.appendChild(scoreLabel);
+                } else {
+                    const stars = document.createElement('span');
+                    if (score >= STAR_THRESHOLDS.THREE) stars.textContent = '★★★';
+                    else if (score >= STAR_THRESHOLDS.TWO) stars.textContent = '★★☆';
+                    else if (score >= STAR_THRESHOLDS.ONE) stars.textContent = '★☆☆';
+                    else stars.textContent = '☆☆☆';
+                    starsContainer.appendChild(stars);
                 }
             }
             stageItem.addEventListener('click', () => {
@@ -349,6 +387,50 @@ function resumeGame() {
             delete el.dataset.val;
         }
     });
+    syncGridVisualStateAfterRender();
+}
+
+function syncGridVisualStateAfterRender() {
+    if (state.isPaused) {
+        ui.gameGridElement?.classList.add('paused');
+        Object.values(ui.cellElements).forEach(el => {
+            if (!el.classList.contains('empty')) {
+                el.dataset.val = el.textContent;
+                el.textContent = '';
+            }
+        });
+    } else {
+        ui.gameGridElement?.classList.remove('paused');
+        Object.values(ui.cellElements).forEach(el => {
+            if (el.dataset.val) {
+                el.textContent = el.dataset.val;
+                delete el.dataset.val;
+            }
+        });
+    }
+
+    if (state.isSelecting && state.selectionStartCell && state.selectionEndCell) {
+        selectCellsInRange(state.selectionStartCell, state.selectionEndCell);
+    } else if (state.selectedCells.length > 0) {
+        state.selectedCells.forEach(cell => {
+            const el = ui.cellElements[`${cell.row}-${cell.col}`];
+            if (el) el.classList.add('selected');
+        });
+    }
+
+    if (state.isHintVisible && state.currentHint) {
+        state.currentHint.forEach(cell => {
+            const el = ui.cellElements[`${cell.row}-${cell.col}`];
+            if (el) el.classList.add('hint');
+        });
+    }
+}
+
+function handleViewportChange() {
+    if (!ui.gameGridElement || !state.grid || state.grid.length === 0) return;
+    ui.renderGrid(window.innerWidth / window.innerHeight);
+    syncGridVisualStateAfterRender();
+    ui.updateUI();
 }
 
 // Worker 메시지 핸들러
@@ -546,8 +628,8 @@ function checkStageCompletion(message) {
     }
 
     if (isZenMode()) {
-        stageData.recordStageScore(state.currentStageNumber, state.score);
-        endGame(`Zen 완료! 점수: ${state.score}. 최고 점수: ${normalizeScore(stageData.stageScores[state.currentStageNumber])}`);
+        stageData.recordStageScore(state.currentStageNumber, state.score, 'zen');
+        endGame(`Zen 완료! 점수: ${state.score}. 최고 점수: ${normalizeScore(stageData.zenStageScores[state.currentStageNumber])}`);
         return;
     }
 
@@ -555,7 +637,7 @@ function checkStageCompletion(message) {
         endGame(message);
         return;
     }
-    stageData.recordStageScore(state.currentStageNumber, state.score);
+    stageData.recordStageScore(state.currentStageNumber, state.score, 'stage');
     stageData.clearStage(state.currentStageNumber);
     if (ui.stageClearInfoElement) ui.stageClearInfoElement.style.display = 'block';
     if (ui.nextStageBtn) ui.nextStageBtn.style.display = 'block';
@@ -606,6 +688,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let activePointerId = null;
     let isTwoFingerPanning = false;
     let lastTwoFingerCenterX = null;
+    let resizeTimer = null;
 
     const isPlayableCell = (cell) => {
         if (!cell) return false;
@@ -829,6 +912,12 @@ document.addEventListener('DOMContentLoaded', () => {
             redoZen();
         }
     });
+
+    window.addEventListener('resize', () => {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(handleViewportChange, 100);
+    });
+    window.addEventListener('orientationchange', handleViewportChange);
 
     // Initial Start
     showModeSelection();
