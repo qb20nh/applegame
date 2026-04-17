@@ -20,6 +20,60 @@ if (IS_LOCALHOST) {
 // 타이머 객체 (가변형으로 변경)
 let gameTimer;
 let timerUIUpdateInterval;
+const zenHistory = {
+    past: [],
+    future: []
+};
+
+const cloneGrid = (grid) => grid.map(row => row.map(cell => cell ? ({ ...cell }) : cell));
+const isZenMode = () => state.gameMode === 'zen';
+
+function resetZenHistory() {
+    zenHistory.past = [];
+    zenHistory.future = [];
+    updateZenButtons();
+}
+
+function captureZenSnapshot() {
+    return {
+        grid: cloneGrid(state.grid),
+        score: state.score
+    };
+}
+
+function pushZenHistory() {
+    if (!isZenMode()) return;
+    zenHistory.past.push(captureZenSnapshot());
+    zenHistory.future = [];
+    updateZenButtons();
+}
+
+function applyZenSnapshot(snapshot) {
+    state.grid = cloneGrid(snapshot.grid);
+    state.score = snapshot.score;
+    hideHint();
+    clearSelection();
+    ui.renderGrid(window.innerWidth / window.innerHeight);
+    ui.updateUI();
+    gameWorker.postMessage({ type: 'SET_GRID', payload: { grid: cloneGrid(state.grid) } });
+    precomputeHints();
+}
+
+function undoZen() {
+    if (!isZenMode() || zenHistory.past.length === 0) return;
+    zenHistory.future.push(captureZenSnapshot());
+    const previous = zenHistory.past.pop();
+    applyZenSnapshot(previous);
+    updateZenButtons();
+}
+
+function redoZen() {
+    if (!isZenMode() || zenHistory.future.length === 0) return;
+    zenHistory.past.push(captureZenSnapshot());
+    const next = zenHistory.future.pop();
+    applyZenSnapshot(next);
+    updateZenButtons();
+}
 
 function initTimers(limit) {
     if (gameTimer) gameTimer.reset();
@@ -69,10 +123,13 @@ const stageData = {
             frenzyHighScore: state.frenzyHighScore
         }));
     },
-    clearStage(stageNumber, score) {
+    recordStageScore(stageNumber, score) {
         if (!this.stageScores[stageNumber] || score > this.stageScores[stageNumber]) {
             this.stageScores[stageNumber] = score;
         }
+        this.saveToStorage();
+    },
+    clearStage(stageNumber) {
         if (stageNumber > this.completedStages) this.completedStages = stageNumber;
         this.saveToStorage();
     }
@@ -85,6 +142,21 @@ const pauseMenuDialog = document.getElementById('pause-menu-dialog');
 const confirmationDialog = document.getElementById('confirmation-dialog');
 let pendingAction = null;
 
+function updateZenButtons() {
+    const undoBtn = document.getElementById('undo-btn');
+    const redoBtn = document.getElementById('redo-btn');
+    const isZen = isZenMode() && ui.gameOverElement?.style.display !== 'flex';
+
+    if (undoBtn) {
+        undoBtn.style.display = isZen ? 'flex' : 'none';
+        undoBtn.disabled = !isZen || zenHistory.past.length === 0;
+    }
+    if (redoBtn) {
+        redoBtn.style.display = isZen ? 'flex' : 'none';
+        redoBtn.disabled = !isZen || zenHistory.future.length === 0;
+    }
+}
+
 function showModeSelection() {
     if (gameTimer) gameTimer.reset();
     hintWaitTimer.reset();
@@ -93,6 +165,7 @@ function showModeSelection() {
     ui.gameGridElement?.classList.remove('paused');
     
     stageData.loadFromStorage();
+    updateZenButtons();
     modeSelectionDialog?.showModal();
 }
 
@@ -140,8 +213,9 @@ function generateStages() {
         }
     }
     
+    const isZen = isZenMode();
     for (let i = startStage; i <= endStage; i++) {
-        const isUnlocked = i <= stageData.completedStages + 1;
+        const isUnlocked = isZen ? i <= stageData.completedStages : i <= stageData.completedStages + 1;
         const stageItem = template.content.cloneNode(true).querySelector('.stage-item');
         stageItem.classList.add(isUnlocked ? 'completed' : 'locked');
         stageItem.querySelector('.stage-number').textContent = i;
@@ -153,10 +227,11 @@ function generateStages() {
                 if (score >= STAR_THRESHOLDS.THREE) starsHTML = '★★★';
                 else if (score >= STAR_THRESHOLDS.TWO) starsHTML = '★★☆';
                 else if (score >= STAR_THRESHOLDS.ONE) starsHTML = '★☆☆';
-                starsContainer.innerHTML = starsHTML;
+                const scoreLabel = score > 0 ? `<span class="best-score">🏆${score}</span>` : '';
+                starsContainer.innerHTML = `${starsHTML}${scoreLabel}`;
             }
             stageItem.addEventListener('click', () => {
-                state.gameMode = 'stage';
+                state.gameMode = isZen ? 'zen' : 'stage';
                 state.rows = 5;
                 state.cols = 10;
                 state.currentStageNumber = i;
@@ -214,6 +289,10 @@ gameWorker.onmessage = function(e) {
                 hintWaitTimer.start();
             }
             precomputeHints();
+            if (isZenMode()) {
+                resetZenHistory();
+                updateZenButtons();
+            }
             break;
         case 'VALIDATION_RESULT':
             handleValidationResult(payload);
@@ -223,6 +302,8 @@ gameWorker.onmessage = function(e) {
             if (state.cachedHints && state.cachedHints.length === 0) {
                 checkStageCompletion('가능한 조합이 없습니다.');
             }
+            break;
+        case 'GRID_SYNCED':
             break;
     }
 };
@@ -235,16 +316,25 @@ function updateTimerUI() {
 
 function initGame() {
     const isFrenzy = state.gameMode === 'frenzy';
+    const isZen = isZenMode();
+    const isTimed = !isZen;
     const limit = isFrenzy ? 10 : TIME_LIMIT;
-    
-    initTimers(limit);
+
+    if (isTimed) {
+        initTimers(limit);
+    } else {
+        if (gameTimer) gameTimer.reset();
+        gameTimer = null;
+        clearInterval(timerUIUpdateInterval);
+    }
     hintWaitTimer.reset();
     hintDisplayTimer.reset();
+    resetZenHistory();
     
     if (ui.gameOverElement) ui.gameOverElement.style.display = 'none';
     state.score = 0;
     state.isPaused = false;
-    state.timeLeft = limit;
+    state.timeLeft = isTimed ? limit : Number.POSITIVE_INFINITY;
     ui.updateUI();
     
     if (ui.gameGridElement) ui.gameGridElement.classList.remove('paused');
@@ -264,6 +354,7 @@ function initGame() {
 function handleValidationResult(result) {
     const { isValid, updates, pointsEarned } = result;
     if (isValid) {
+        if (isZenMode()) pushZenHistory();
         revealUpdatesWithAnimation(updates);
         updates.forEach(upd => {
             state.grid[upd.row][upd.col] = {
@@ -379,11 +470,18 @@ function checkStageCompletion(message) {
         return;
     }
 
+    stageData.recordStageScore(state.currentStageNumber, state.score);
+
+    if (isZenMode()) {
+        endGame(`Zen 종료! 점수: ${state.score}. 최고 점수: ${stageData.stageScores[state.currentStageNumber] || state.score}`);
+        return;
+    }
+
     if (state.score < 50) {
         endGame(message);
         return;
     }
-    stageData.clearStage(state.currentStageNumber, state.score);
+    stageData.clearStage(state.currentStageNumber);
     if (ui.stageClearInfoElement) ui.stageClearInfoElement.style.display = 'block';
     if (ui.nextStageBtn) ui.nextStageBtn.style.display = 'block';
     endGame(message);
@@ -400,7 +498,7 @@ function endGame(message, isFrenzy = false) {
         const msgEl = document.getElementById('game-over-message') || document.getElementById('result-message');
         if (msgEl) msgEl.textContent = message;
         
-        if (isFrenzy) {
+        if (isFrenzy || isZenMode()) {
            if (ui.stageClearInfoElement) ui.stageClearInfoElement.style.display = 'none';
            if (ui.nextStageBtn) ui.nextStageBtn.style.display = 'none';
         } else {
@@ -417,6 +515,7 @@ function endGame(message, isFrenzy = false) {
             }
         }
     }
+    updateZenButtons();
 }
 
 function explodeTimerDisplay(onComplete) {
@@ -607,6 +706,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Mode Selection Buttons
     document.getElementById('mode-stage-btn')?.addEventListener('click', () => {
         modeSelectionDialog.close();
+        state.gameMode = 'stage';
+        showStageSelection();
+    });
+
+    document.getElementById('mode-zen-btn')?.addEventListener('click', () => {
+        modeSelectionDialog.close();
+        state.gameMode = 'zen';
         showStageSelection();
     });
 
@@ -632,6 +738,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (stageData.currentPage < totalPages) {
             stageData.currentPage++;
             generateStages();
+        }
+    });
+
+    document.getElementById('undo-btn')?.addEventListener('click', undoZen);
+    document.getElementById('redo-btn')?.addEventListener('click', redoZen);
+    document.addEventListener('keydown', (e) => {
+        if (!isZenMode()) return;
+        const key = e.key.toLowerCase();
+        if ((e.ctrlKey || e.metaKey) && key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            undoZen();
+        } else if ((e.ctrlKey || e.metaKey) && (key === 'y' || (key === 'z' && e.shiftKey))) {
+            e.preventDefault();
+            redoZen();
         }
     });
 

@@ -41,11 +41,12 @@ export const ui = {
     updateUI() {
         if (this.scoreElement) this.scoreElement.textContent = state.score;
         if (this.timeElement) {
-            this.timeElement.textContent = Math.ceil(state.timeLeft);
+            const isInfiniteTime = !Number.isFinite(state.timeLeft);
+            this.timeElement.textContent = isInfiniteTime ? '∞' : Math.ceil(state.timeLeft);
             
             // 시간 경과에 따른 시각적 경고 효과
             this.timeElement.classList.remove('time-warning', 'time-blink-10', 'time-blink-5', 'time-blink-1');
-            if (state.timeLeft <= 10) {
+            if (!isInfiniteTime && state.timeLeft <= 10) {
                 this.timeElement.classList.add('time-warning');
                 if (state.timeLeft <= 1) this.timeElement.classList.add('time-blink-1');
                 else if (state.timeLeft <= 5) this.timeElement.classList.add('time-blink-5');

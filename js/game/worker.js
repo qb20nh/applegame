@@ -24,6 +24,12 @@ self.onmessage = function(e) {
             const hints = engine.findHints();
             self.postMessage({ type: 'HINTS_RESULT', payload: { hints } });
             break;
+        
+        case 'SET_GRID':
+            if (!engine) return;
+            engine.setGrid(payload.grid);
+            self.postMessage({ type: 'GRID_SYNCED' });
+            break;
             
         default:
             console.warn(`Unknown message type: ${type}`);
