@@ -79,6 +79,7 @@ h1 {
 
 .game-grid {
     display: grid;
+    touch-action: none;
     grid-template-columns: repeat(var(--grid-cols), var(--cell-size));
     grid-template-rows: repeat(var(--grid-rows), var(--cell-size));
     gap: var(--grid-gap);
