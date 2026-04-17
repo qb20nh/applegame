@@ -430,6 +430,8 @@ document.addEventListener('DOMContentLoaded', () => {
     stageData.loadFromStorage();
 
     let activePointerId = null;
+    let isTwoFingerPanning = false;
+    let lastTwoFingerCenterX = null;
 
     const isPlayableCell = (cell) => {
         if (!cell) return false;
@@ -439,7 +441,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Pointer Events
     ui.gameGridElement?.addEventListener('pointerdown', (e) => {
-        if (state.isPaused || state.timeLeft <= 0 || state.isSelecting) return;
+        if (state.isPaused || state.timeLeft <= 0 || state.isSelecting || isTwoFingerPanning) return;
 
         const startCell = getCellCoordinatesFromPosition(e.clientX, e.clientY, window.innerWidth / window.innerHeight);
         if (!isPlayableCell(startCell)) return;
@@ -501,8 +503,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('pointercancel', finalizeSelection);
 
     // iOS/Safari fallback: prevent touchmove scroll/pull-to-refresh while selecting on the grid.
+    // Also support two-finger horizontal pan to scroll overflowed boards.
     ui.gameGridElement?.addEventListener('touchstart', (e) => {
         if (state.isPaused || state.timeLeft <= 0) return;
+
+        if (e.touches.length >= 2) {
+            isTwoFingerPanning = true;
+            const [t1, t2] = e.touches;
+            lastTwoFingerCenterX = (t1.clientX + t2.clientX) / 2;
+            activePointerId = null;
+            state.isSelecting = false;
+            clearSelection();
+            e.preventDefault();
+            return;
+        }
 
         const touch = e.touches?.[0];
         if (!touch) return;
@@ -511,8 +525,31 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isPlayableCell(startCell)) e.preventDefault();
     }, { passive: false });
 
+    ui.gameGridElement?.addEventListener('touchmove', (e) => {
+        if (!isTwoFingerPanning || e.touches.length < 2 || !ui.gameGridElement) return;
+
+        const [t1, t2] = e.touches;
+        const centerX = (t1.clientX + t2.clientX) / 2;
+        if (lastTwoFingerCenterX !== null) {
+            const deltaX = centerX - lastTwoFingerCenterX;
+            ui.gameGridElement.scrollLeft -= deltaX;
+        }
+        lastTwoFingerCenterX = centerX;
+        e.preventDefault();
+    }, { passive: false });
+
+    const endTwoFingerPan = (e) => {
+        if (e.touches.length < 2) {
+            isTwoFingerPanning = false;
+            lastTwoFingerCenterX = null;
+        }
+    };
+
+    ui.gameGridElement?.addEventListener('touchend', endTwoFingerPan, { passive: false });
+    ui.gameGridElement?.addEventListener('touchcancel', endTwoFingerPan, { passive: false });
+
     document.addEventListener('touchmove', (e) => {
-        if (state.isSelecting) e.preventDefault();
+        if (state.isSelecting || isTwoFingerPanning) e.preventDefault();
     }, { passive: false });
 
     // UI Buttons
