@@ -335,12 +335,13 @@ function generateStages() {
                     scoreLabel.textContent = score > 0 ? `🏆${score}` : '-';
                     starsContainer.appendChild(scoreLabel);
                 } else {
-                    const stars = document.createElement('span');
-                    if (score >= STAR_THRESHOLDS.THREE) stars.textContent = '★★★';
-                    else if (score >= STAR_THRESHOLDS.TWO) stars.textContent = '★★☆';
-                    else if (score >= STAR_THRESHOLDS.ONE) stars.textContent = '★☆☆';
-                    else stars.textContent = '☆☆☆';
-                    starsContainer.appendChild(stars);
+                    if (score >= STAR_THRESHOLDS.ONE) {
+                        const stars = document.createElement('span');
+                        if (score >= STAR_THRESHOLDS.THREE) stars.textContent = '★★★';
+                        else if (score >= STAR_THRESHOLDS.TWO) stars.textContent = '★★☆';
+                        else stars.textContent = '★☆☆';
+                        starsContainer.appendChild(stars);
+                    }
                 }
             }
             stageItem.addEventListener('click', () => {
@@ -654,6 +655,9 @@ function endGame(message, isFrenzy = false) {
         ui.gameOverElement.style.display = 'flex';
         const msgEl = document.getElementById('game-over-message') || document.getElementById('result-message');
         if (msgEl) msgEl.textContent = message;
+        if (ui.stageSelectBtn) {
+            ui.stageSelectBtn.textContent = isFrenzy ? '돌아가기' : '스테이지 선택';
+        }
         
         if (isFrenzy || isZenMode()) {
            if (ui.stageClearInfoElement) ui.stageClearInfoElement.style.display = 'none';
@@ -816,6 +820,11 @@ document.addEventListener('DOMContentLoaded', () => {
         initGame();
     });
     ui.stageSelectBtn?.addEventListener('click', () => {
+        if (state.gameMode === 'frenzy') {
+            if (ui.gameOverElement) ui.gameOverElement.style.display = 'none';
+            showModeSelection();
+            return;
+        }
         showStageSelection();
     });
 
