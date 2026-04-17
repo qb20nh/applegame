@@ -446,7 +446,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         activePointerId = e.pointerId;
         if (e.pointerType === POINTER_TYPE_TOUCH) e.preventDefault();
-        ui.gameGridElement?.setPointerCapture?.(e.pointerId);
+        try {
+            ui.gameGridElement?.setPointerCapture?.(e.pointerId);
+        } catch (_) {
+            // Some browsers can throw if capture cannot be established.
+        }
 
         state.isSelecting = true;
         state.selectionStartCell = startCell;
@@ -468,9 +472,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const finalizeSelection = (e) => {
         if (!state.isSelecting || e.pointerId !== activePointerId) return;
 
-        ui.gameGridElement?.releasePointerCapture?.(e.pointerId);
-        activePointerId = null;
-        state.isSelecting = false;
+        try {
+            if (ui.gameGridElement?.hasPointerCapture?.(e.pointerId)) {
+                ui.gameGridElement.releasePointerCapture(e.pointerId);
+            }
+        } catch (_) {
+            // Ignore release failures and continue finalization.
+        } finally {
+            activePointerId = null;
+            state.isSelecting = false;
+        }
 
         if (state.selectedCells.length > 0) {
             gameWorker.postMessage({
