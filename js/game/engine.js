@@ -82,6 +82,13 @@ export class GameEngine {
         return this.grid;
     }
 
+    setGrid(grid) {
+        this.grid = grid.map(row => row.map(cell => cell ? ({ ...cell }) : cell));
+        this.gameStateChanged = true;
+        this.cachedHints = null;
+        this.buildAllPrefixSums();
+    }
+
     getColor(row, col) {
         const patternGenerators = [
             patterns.halfSquare,

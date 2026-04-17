@@ -478,6 +478,13 @@ h1 {
     text-shadow: 1px 1px 0 #0008;
 }
 
+.best-score {
+    display: block;
+    font-size: 10px;
+    margin-top: 2px;
+    color: #fff;
+}
+
 .dialog-buttons {
     display: flex;
     justify-content: center;
@@ -645,6 +652,31 @@ h1 {
     padding: 0;
 }
 
+.zen-action-btn {
+    position: fixed;
+    bottom: 20px;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background-color: #2a9d8f;
+    color: white;
+    border: none;
+    font-size: 24px;
+    box-shadow: 0 4px 8px var(--color-shadow-deep);
+    cursor: pointer;
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+#undo-btn { right: 90px; }
+#redo-btn { right: 148px; }
+.zen-action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 .pause-btn:hover {
     background-color: var(--color-button-hover);
     transform: scale(1.05);
@@ -805,6 +837,15 @@ h1 {
         bottom: 15px;
         right: 15px;
     }
+
+    .zen-action-btn {
+        width: 44px;
+        height: 44px;
+        bottom: 15px;
+        font-size: 20px;
+    }
+    #undo-btn { right: 75px; }
+    #redo-btn { right: 125px; }
 
     .pause-dialog .dialog-content,
     .confirmation-dialog .dialog-content {

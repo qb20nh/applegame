@@ -24,7 +24,7 @@ export const state = {
     lastShownHintIndex: -1,
     isPaused: false,
     gameStateChanged: false,
-    gameMode: 'stage', // 'stage' or 'frenzy'
+    gameMode: 'stage', // 'stage' | 'zen' | 'frenzy'
     frenzyHighScore: 0,
     rows: 5,
     cols: 10
