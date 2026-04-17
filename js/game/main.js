@@ -20,13 +20,56 @@ if (IS_LOCALHOST) {
 // 타이머 객체 (가변형으로 변경)
 let gameTimer;
 let timerUIUpdateInterval;
+const MAX_ZEN_HISTORY = 64;
 const zenHistory = {
     past: [],
     future: []
 };
 
-const cloneGrid = (grid) => grid.map(row => row.map(cell => cell ? ({ ...cell }) : cell));
 const isZenMode = () => state.gameMode === 'zen';
+
+function normalizeScore(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) return 0;
+    return Math.floor(numeric);
+}
+
+function packGridSnapshot(grid, rows, cols) {
+    const size = rows * cols;
+    const values = new Uint8Array(size);
+    const depths = new Uint16Array(size);
+    let idx = 0;
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const cell = grid[r]?.[c];
+            values[idx] = cell?.value ?? 0;
+            depths[idx] = cell?.layerDepth ?? 0;
+            idx++;
+        }
+    }
+    return { rows, cols, values, depths };
+}
+
+function unpackGridSnapshot(snapshot) {
+    const { rows, cols, values, depths } = snapshot;
+    const grid = [];
+    let idx = 0;
+    for (let r = 0; r < rows; r++) {
+        const row = [];
+        for (let c = 0; c < cols; c++) {
+            const value = values[idx];
+            const layerDepth = depths[idx];
+            row.push({
+                value,
+                layerDepth,
+                color: COLORS[layerDepth % COLORS.length]
+            });
+            idx++;
+        }
+        grid.push(row);
+    }
+    return grid;
+}
 
 function resetZenHistory() {
     zenHistory.past = [];
@@ -35,28 +78,40 @@ function resetZenHistory() {
 }
 
 function captureZenSnapshot() {
+    const packed = packGridSnapshot(state.grid, state.rows, state.cols);
     return {
-        grid: cloneGrid(state.grid),
+        ...packed,
         score: state.score
     };
 }
 
 function pushZenHistory() {
     if (!isZenMode()) return;
+    if (zenHistory.past.length >= MAX_ZEN_HISTORY) zenHistory.past.shift();
     zenHistory.past.push(captureZenSnapshot());
     zenHistory.future = [];
     updateZenButtons();
 }
 
 function applyZenSnapshot(snapshot) {
-    state.grid = cloneGrid(snapshot.grid);
+    state.cachedHints = null;
+    state.currentHint = null;
+    state.lastVisibleHint = null;
+    state.secondLastVisibleHint = null;
+    state.lastShownHintIndex = -1;
+    hintWaitTimer.reset();
+    hintDisplayTimer.reset();
+    state.grid = unpackGridSnapshot(snapshot);
     state.score = snapshot.score;
     hideHint();
     clearSelection();
     ui.renderGrid(window.innerWidth / window.innerHeight);
     ui.updateUI();
-    gameWorker.postMessage({ type: 'SET_GRID', payload: { grid: cloneGrid(state.grid) } });
+    gameWorker.postMessage({ type: 'SET_GRID', payload: { grid: state.grid } });
     precomputeHints();
+    if (!state.isPaused) {
+        hintWaitTimer.start();
+    }
 }
 
 function undoZen() {
@@ -107,12 +162,18 @@ const stageData = {
     stagesPerPage: 100,
     loadFromStorage() {
         const stored = localStorage.getItem('stageData');
+        this.completedStages = 0;
+        this.stageScores = {};
+        state.frenzyHighScore = 0;
         if (stored) {
             try {
                 const parsed = JSON.parse(stored);
-                this.completedStages = parsed.completedStages || 0;
-                this.stageScores = parsed.stageScores || {};
-                state.frenzyHighScore = parsed.frenzyHighScore || 0;
+                this.completedStages = Math.max(0, Math.floor(Number(parsed.completedStages) || 0));
+                const rawScores = parsed.stageScores && typeof parsed.stageScores === 'object' ? parsed.stageScores : {};
+                this.stageScores = Object.fromEntries(
+                    Object.entries(rawScores).map(([stage, score]) => [stage, normalizeScore(score)])
+                );
+                state.frenzyHighScore = normalizeScore(parsed.frenzyHighScore);
             } catch (e) { console.error(e); }
         }
     },
@@ -124,8 +185,10 @@ const stageData = {
         }));
     },
     recordStageScore(stageNumber, score) {
-        if (!this.stageScores[stageNumber] || score > this.stageScores[stageNumber]) {
-            this.stageScores[stageNumber] = score;
+        const normalizedScore = normalizeScore(score);
+        const currentBest = normalizeScore(this.stageScores[stageNumber]);
+        if (normalizedScore > currentBest) {
+            this.stageScores[stageNumber] = normalizedScore;
         }
         this.saveToStorage();
     },
@@ -171,6 +234,11 @@ function showModeSelection() {
 
 function showStageSelection() {
     stageData.currentPage = 1;
+    if (isZenMode() && stageData.completedStages < 1) {
+        alert('먼저 캠페인에서 최소 1개 스테이지를 클리어해야 젠 모드를 플레이할 수 있어요.');
+        showModeSelection();
+        return;
+    }
     generateStages();
     stageDialog?.showModal();
 }
@@ -220,15 +288,22 @@ function generateStages() {
         stageItem.classList.add(isUnlocked ? 'completed' : 'locked');
         stageItem.querySelector('.stage-number').textContent = i;
         if (isUnlocked) {
-            const score = stageData.stageScores[i] || 0;
+            const score = normalizeScore(stageData.stageScores[i]);
             const starsContainer = stageItem.querySelector('.stars');
             if (starsContainer) {
-                let starsHTML = '';
-                if (score >= STAR_THRESHOLDS.THREE) starsHTML = '★★★';
-                else if (score >= STAR_THRESHOLDS.TWO) starsHTML = '★★☆';
-                else if (score >= STAR_THRESHOLDS.ONE) starsHTML = '★☆☆';
-                const scoreLabel = score > 0 ? `<span class="best-score">🏆${score}</span>` : '';
-                starsContainer.innerHTML = `${starsHTML}${scoreLabel}`;
+                starsContainer.textContent = '';
+                const stars = document.createElement('span');
+                if (score >= STAR_THRESHOLDS.THREE) stars.textContent = '★★★';
+                else if (score >= STAR_THRESHOLDS.TWO) stars.textContent = '★★☆';
+                else if (score >= STAR_THRESHOLDS.ONE) stars.textContent = '★☆☆';
+                starsContainer.appendChild(stars);
+
+                if (score > 0) {
+                    const scoreLabel = document.createElement('span');
+                    scoreLabel.className = 'best-score';
+                    scoreLabel.textContent = `🏆${score}`;
+                    starsContainer.appendChild(scoreLabel);
+                }
             }
             stageItem.addEventListener('click', () => {
                 state.gameMode = isZen ? 'zen' : 'stage';
@@ -470,10 +545,9 @@ function checkStageCompletion(message) {
         return;
     }
 
-    stageData.recordStageScore(state.currentStageNumber, state.score);
-
     if (isZenMode()) {
-        endGame(`Zen 종료! 점수: ${state.score}. 최고 점수: ${stageData.stageScores[state.currentStageNumber] || state.score}`);
+        stageData.recordStageScore(state.currentStageNumber, state.score);
+        endGame(`Zen 완료! 점수: ${state.score}. 최고 점수: ${normalizeScore(stageData.stageScores[state.currentStageNumber])}`);
         return;
     }
 
@@ -481,6 +555,7 @@ function checkStageCompletion(message) {
         endGame(message);
         return;
     }
+    stageData.recordStageScore(state.currentStageNumber, state.score);
     stageData.clearStage(state.currentStageNumber);
     if (ui.stageClearInfoElement) ui.stageClearInfoElement.style.display = 'block';
     if (ui.nextStageBtn) ui.nextStageBtn.style.display = 'block';
