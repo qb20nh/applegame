@@ -7,9 +7,9 @@ self.onmessage = function(e) {
 
     switch (type) {
         case 'INIT':
-            const { rows, cols, stageNumber, seed } = payload;
+            const { rows, cols, stageNumber, seed, gameMode } = payload;
             engine = new GameEngine(rows, cols);
-            const grid = engine.init(stageNumber, seed);
+            const grid = engine.init(stageNumber, seed, gameMode);
             self.postMessage({ type: 'INIT_COMPLETE', payload: { grid } });
             break;
 
