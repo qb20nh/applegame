@@ -218,6 +218,7 @@ const stageDialog = document.getElementById('stage-selection-dialog');
 const pauseMenuDialog = document.getElementById('pause-menu-dialog');
 const confirmationDialog = document.getElementById('confirmation-dialog');
 let pendingAction = null;
+let fallingTimeoutIds = [];
 
 function updateZenButtons() {
     const undoBtn = document.getElementById('undo-btn');
@@ -234,7 +235,14 @@ function updateZenButtons() {
     }
 }
 
+function clearFallingBlocks() {
+    fallingTimeoutIds.forEach(id => clearTimeout(id));
+    fallingTimeoutIds = [];
+    document.querySelectorAll('.falling').forEach(el => el.remove());
+}
+
 function showModeSelection() {
+    clearFallingBlocks();
     if (gameTimer) gameTimer.reset();
     hintWaitTimer.reset();
     hintDisplayTimer.reset();
@@ -247,6 +255,7 @@ function showModeSelection() {
 }
 
 function showStageSelection() {
+    clearFallingBlocks();
     stageData.currentPage = 1;
     if (stageDialog) stageDialog.scrollTop = 0;
     const dialogContent = stageDialog?.querySelector('.dialog-content');
@@ -473,6 +482,7 @@ function updateTimerUI() {
 }
 
 function initGame() {
+    clearFallingBlocks();
     const isFrenzy = state.gameMode === 'frenzy';
     const isZen = isZenMode();
     const isTimed = !isZen;
@@ -543,7 +553,7 @@ function handleValidationResult(result) {
 function revealUpdatesWithAnimation(updates) {
     const sortedUpdates = [...updates].sort((a, b) => (a.row !== b.row) ? a.row - b.row : a.col - b.col);
     sortedUpdates.forEach((upd, index) => {
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
             const cellEl = ui.cellElements[`${upd.row}-${upd.col}`];
             if (!cellEl) return;
             
@@ -578,6 +588,7 @@ function revealUpdatesWithAnimation(updates) {
             };
             startPhysicsAnimation(physics, () => clone.remove());
         }, index * 50);
+        fallingTimeoutIds.push(timeoutId);
     });
     clearSelection();
 }
