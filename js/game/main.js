@@ -234,6 +234,10 @@ function updateZenButtons() {
     }
 }
 
+function clearFallingBlocks() {
+    document.querySelectorAll('.falling').forEach(el => el.remove());
+}
+
 function showModeSelection() {
     if (gameTimer) gameTimer.reset();
     hintWaitTimer.reset();
@@ -815,12 +819,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }, { passive: false });
 
     // UI Buttons
-    ui.restartBtn?.addEventListener('click', () => initGame());
+    ui.restartBtn?.addEventListener('click', () => {
+        clearFallingBlocks();
+        initGame();
+    });
     ui.nextStageBtn?.addEventListener('click', () => {
+        clearFallingBlocks();
         state.currentStageNumber++;
         initGame();
     });
     ui.stageSelectBtn?.addEventListener('click', () => {
+        clearFallingBlocks();
         if (state.gameMode === 'frenzy') {
             if (ui.gameOverElement) ui.gameOverElement.style.display = 'none';
             showModeSelection();
@@ -863,6 +872,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('confirm-yes-btn')?.addEventListener('click', () => {
         confirmationDialog?.close();
+        clearFallingBlocks();
         if (pendingAction === 'restart') {
             initGame();
         } else if (pendingAction === 'giveup') {
