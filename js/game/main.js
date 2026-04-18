@@ -4,7 +4,7 @@ import { ROWS, COLS, TARGET_SUM, TIME_LIMIT, COLORS, POINTER_TYPE_TOUCH, STAR_TH
 import { state, gameState, generateStageSeed } from './state.js';
 import { ui } from './ui.js';
 import { getCellCoordinatesFromPosition, selectCellsInRange, clearSelection } from './input.js';
-import { startPhysicsAnimation, explodeCellsGrid } from './animations.js';
+import { startPhysicsAnimation, explodeCellsGrid, createExplosionPhysics } from './animations.js';
 
 const noop = () => {};
 const IS_LOCALHOST = isLocalhost();
@@ -366,42 +366,8 @@ function generateStages() {
     }
 }
 
-function pauseGame() {
-    if (state.isPaused) return;
-    state.isPaused = true;
-    if (gameTimer) gameTimer.pause();
-    hintWaitTimer.pause();
-    hintDisplayTimer.pause();
-    ui.gameGridElement?.classList.add('paused');
-    Object.values(ui.cellElements).forEach(el => {
-        if (!el.classList.contains('empty')) {
-            el.dataset.val = el.textContent;
-            el.textContent = '';
-        }
-    });
-}
-
-function resumeGame() {
-    if (!state.isPaused) return;
-    state.isPaused = false;
-    if (gameTimer) gameTimer.resume();
-    // Only resume hints if not in Frenzy mode
-    if (state.gameMode !== 'frenzy') {
-        hintWaitTimer.resume();
-        hintDisplayTimer.resume();
-    }
-    ui.gameGridElement?.classList.remove('paused');
-    Object.values(ui.cellElements).forEach(el => {
-        if (el.dataset.val) {
-            el.textContent = el.dataset.val;
-            delete el.dataset.val;
-        }
-    });
-    syncGridVisualStateAfterRender();
-}
-
-function syncGridVisualStateAfterRender() {
-    if (state.isPaused) {
+function setGridPausedState(isPaused) {
+    if (isPaused) {
         ui.gameGridElement?.classList.add('paused');
         Object.values(ui.cellElements).forEach(el => {
             if (!el.classList.contains('empty')) {
@@ -418,6 +384,32 @@ function syncGridVisualStateAfterRender() {
             }
         });
     }
+}
+
+function pauseGame() {
+    if (state.isPaused) return;
+    state.isPaused = true;
+    if (gameTimer) gameTimer.pause();
+    hintWaitTimer.pause();
+    hintDisplayTimer.pause();
+    setGridPausedState(true);
+}
+
+function resumeGame() {
+    if (!state.isPaused) return;
+    state.isPaused = false;
+    if (gameTimer) gameTimer.resume();
+    // Only resume hints if not in Frenzy mode
+    if (state.gameMode !== 'frenzy') {
+        hintWaitTimer.resume();
+        hintDisplayTimer.resume();
+    }
+    setGridPausedState(false);
+    syncGridVisualStateAfterRender();
+}
+
+function syncGridVisualStateAfterRender() {
+    setGridPausedState(state.isPaused);
 
     if (state.isSelecting && state.selectionStartCell && state.selectionEndCell) {
         selectCellsInRange(state.selectionStartCell, state.selectionEndCell);
@@ -577,15 +569,7 @@ function revealUpdatesWithAnimation(updates) {
                 cellEl.classList.add('empty');
             }
 
-            const physics = {
-                angle: (45 + Math.random() * 90) * Math.PI / 180,
-                initialSpeed: 200 + Math.random() * 100,
-                rotationSpeed: -360 + Math.random() * 720,
-                gravity: 980,
-                duration: 400 + Math.random() * 400,
-                startTime: null,
-                x: 0, y: 0, rotation: 0, opacity: 1, element: clone
-            };
+            const physics = createExplosionPhysics(clone);
             startPhysicsAnimation(physics, () => clone.remove());
         }, index * 50);
         fallingTimeoutIds.push(timeoutId);

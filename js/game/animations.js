@@ -39,6 +39,19 @@ export function startPhysicsAnimation(physics, onComplete) {
     activeAnimations.push(animationId);
 }
 
+export function createExplosionPhysics(element = null) {
+    return {
+        angle: (45 + Math.random() * 90) * Math.PI / 180,
+        initialSpeed: 200 + Math.random() * 100,
+        rotationSpeed: -360 + Math.random() * 720,
+        gravity: 980,
+        duration: 400 + Math.random() * 400,
+        startTime: null,
+        x: 0, y: 0, rotation: 0, opacity: 1,
+        element
+    };
+}
+
 export function explodeCellsGrid(activeDomCells, onComplete) {
     if (activeDomCells.length === 0) {
         if (onComplete) onComplete();
@@ -62,16 +75,7 @@ export function explodeCellsGrid(activeDomCells, onComplete) {
         const delay = Math.max(0, Math.min(2000, getNormalRandom(MEAN_DELAY, STD_DEVIATION)));
         
         setTimeout(() => {
-            const physics = {
-                angle: (45 + Math.random() * 90) * Math.PI / 180,
-                initialSpeed: 200 + Math.random() * 100,
-                rotationSpeed: -360 + Math.random() * 720,
-                gravity: 980,
-                duration: 400 + Math.random() * 400,
-                startTime: null,
-                x: 0, y: 0, rotation: 0, opacity: 1,
-                element: null
-            };
+            const physics = createExplosionPhysics();
             
             const cellRect = element.getBoundingClientRect();
             const cellStyle = window.getComputedStyle(element);
