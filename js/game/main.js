@@ -181,7 +181,13 @@ const stageData = {
           Object.entries(campaignRawScores).map(([stage, score]) => [stage, normalizeScore(score)])
         )
         this.zenStageScores = Object.fromEntries(
-          Object.entries(zenRawScores).map(([stage, score]) => [stage, normalizeScore(score)])
+          Object.entries(zenRawScores).map(([stage, scoreOrObj]) => {
+            if (scoreOrObj && typeof scoreOrObj === 'object') {
+              return [stage, { hi: normalizeScore(scoreOrObj.hi), lo: normalizeScore(scoreOrObj.lo) }]
+            }
+            const score = normalizeScore(scoreOrObj)
+            return [stage, { hi: score, lo: score }]
+          })
         )
         state.frenzyHighScore = normalizeScore(parsed.frenzyHighScore)
       } catch (e) { console.error(e) }
@@ -197,11 +203,20 @@ const stageData = {
   },
   recordStageScore (stageNumber, score, mode = 'stage') {
     const normalizedScore = normalizeScore(score)
-    const isZen = mode === 'zen'
-    const scoreTable = isZen ? this.zenStageScores : this.campaignStageScores
-    const currentBest = normalizeScore(scoreTable[stageNumber])
-    if (normalizedScore > currentBest) {
-      scoreTable[stageNumber] = normalizedScore
+    if (mode === 'zen') {
+      const current = this.zenStageScores[stageNumber] || { hi: 0, lo: 0 }
+      if (current.hi === 0 && current.lo === 0) {
+        this.zenStageScores[stageNumber] = { hi: normalizedScore, lo: normalizedScore }
+      } else {
+        if (normalizedScore > current.hi) current.hi = normalizedScore
+        if (normalizedScore < current.lo || current.lo === 0) current.lo = normalizedScore
+        this.zenStageScores[stageNumber] = current
+      }
+    } else {
+      const currentBest = normalizeScore(this.campaignStageScores[stageNumber])
+      if (normalizedScore > currentBest) {
+        this.campaignStageScores[stageNumber] = normalizedScore
+      }
     }
     this.saveToStorage()
   },
@@ -324,18 +339,23 @@ function generateStages () {
     stageItem.classList.add(isUnlocked ? 'completed' : 'locked')
     stageItem.querySelector('.stage-number').textContent = i
     if (isUnlocked) {
-      const score = normalizeScore(
-        isZen ? stageData.zenStageScores[i] : stageData.campaignStageScores[i]
-      )
       const starsContainer = stageItem.querySelector('.stars')
       if (starsContainer) {
         starsContainer.textContent = ''
         if (isZen) {
+          const zenData = stageData.zenStageScores[i] || { hi: 0, lo: 0 }
           const scoreLabel = document.createElement('span')
           scoreLabel.className = 'best-score'
-          scoreLabel.textContent = score > 0 ? `🏆${score}` : '-'
+          if (zenData.hi === 0) {
+            scoreLabel.textContent = '-'
+          } else if (zenData.hi === zenData.lo) {
+            scoreLabel.textContent = `🏆${zenData.hi}`
+          } else {
+            scoreLabel.textContent = `🏆${zenData.hi}/${zenData.lo} (hi/lo)`
+          }
           starsContainer.appendChild(scoreLabel)
         } else {
+          const score = normalizeScore(stageData.campaignStageScores[i])
           if (score >= STAR_THRESHOLDS.ONE) {
             const stars = document.createElement('span')
             if (score >= STAR_THRESHOLDS.THREE) stars.textContent = '★★★'
@@ -616,7 +636,8 @@ function checkStageCompletion (message) {
 
   if (isZenMode()) {
     stageData.recordStageScore(state.currentStageNumber, state.score, 'zen')
-    endGame(`Zen 완료! 점수: ${state.score}. 최고 점수: ${normalizeScore(stageData.zenStageScores[state.currentStageNumber])}`)
+    const zenData = stageData.zenStageScores[state.currentStageNumber]
+    endGame(`Zen 완료! 점수: ${state.score}. (최고: ${zenData.hi}, 최저: ${zenData.lo})`)
     return
   }
 
