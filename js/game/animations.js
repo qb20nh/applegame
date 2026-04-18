@@ -143,11 +143,13 @@ export function explodeCellsGrid (activeDomCells, onComplete) {
 
       startPhysicsAnimation(physics, () => {
         if (document.body.contains(clone)) document.body.removeChild(clone)
-        const hIdx = hiddenElements.indexOf(element)
-        if (hIdx !== -1) hiddenElements.splice(hIdx, 1)
         completedAnimations++
         if (completedAnimations === totalAnimations) {
-          activeDomCells.forEach(cell => { cell.style.visibility = 'visible' })
+          activeDomCells.forEach(cell => {
+            cell.style.visibility = 'visible'
+            const hIdx = hiddenElements.indexOf(cell)
+            if (hIdx !== -1) hiddenElements.splice(hIdx, 1)
+          })
           if (onComplete) onComplete()
         }
       })
