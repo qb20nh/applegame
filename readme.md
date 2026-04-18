@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="taegeukgi.svg" alt="Taegeukgi" height="64" border="1">
+  <a href="https://claude.ai/public/artifacts/14f7c2fa-7cc4-40db-b9f3-f26d969dc477" target="_blank" rel="noopener noreferrer"><img src="taegeukgi.svg" alt="Taegeukgi" height="64" border="1"></a>
 </p>
 이 게임은 "넘버 게임: 10 만들기"(Number Game: Make 10)라는 격자 기반 퍼즐 게임입니다.
 게임 개요:
