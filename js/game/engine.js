@@ -48,6 +48,7 @@ export class GameEngine {
         this.grid = [];
         this.random = null;
         this.currentStageNumber = 1;
+        this.gameMode = 'stage';
         
         // 누적 합 테이블
         this.prefixSumTable = null;
@@ -59,8 +60,9 @@ export class GameEngine {
         this.gameStateChanged = true;
     }
 
-    init(stageNumber, seed) {
+    init(stageNumber, seed, gameMode = 'stage') {
         this.currentStageNumber = stageNumber;
+        this.gameMode = gameMode;
         this.random = new SeededRandom(seed);
         this.grid = [];
         this.gameStateChanged = true;
@@ -215,7 +217,7 @@ export class GameEngine {
                            isMatch(lastVisibleHint, selectedCellCoords) ||
                            isMatch(secondLastVisibleHint, selectedCellCoords);
 
-        if (isUsingHint) {
+        if (isUsingHint && this.gameMode !== 'zen') {
             multiplier = 1;
         }
 

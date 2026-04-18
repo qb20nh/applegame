@@ -504,7 +504,8 @@ function initGame() {
             rows: state.rows,
             cols: state.cols,
             stageNumber: isFrenzy ? 7 : state.currentStageNumber,
-            seed: generateStageSeed(isFrenzy ? 999 : state.currentStageNumber)
+            seed: generateStageSeed(isFrenzy ? 999 : state.currentStageNumber),
+            gameMode: state.gameMode
         }
     });
 }
