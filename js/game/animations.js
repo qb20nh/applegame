@@ -3,6 +3,7 @@ import { state } from './state.js'
 export const activeAnimations = []
 export const pendingTimeouts = []
 export const activeElements = []
+export const hiddenElements = []
 
 export function scheduleAnimation (callback, delay) {
   const timeoutId = setTimeout(() => {
@@ -15,7 +16,7 @@ export function scheduleAnimation (callback, delay) {
 }
 
 export function stopAllAnimations () {
-  activeAnimations.forEach(id => cancelAnimationFrame(id))
+  activeAnimations.forEach(handle => cancelAnimationFrame(handle.id))
   activeAnimations.length = 0
 
   pendingTimeouts.forEach(id => clearTimeout(id))
@@ -25,11 +26,16 @@ export function stopAllAnimations () {
     if (el && el.parentNode) el.parentNode.removeChild(el)
   })
   activeElements.length = 0
+
+  hiddenElements.forEach(el => {
+    if (el) el.style.visibility = 'visible'
+  })
+  hiddenElements.length = 0
 }
 
 export function startPhysicsAnimation (physics, onComplete) {
   physics.startTime = performance.now()
-  let animationId = null
+  const handle = { id: null }
 
   function animate (timestamp) {
     if (state.isPaused) return
@@ -37,7 +43,7 @@ export function startPhysicsAnimation (physics, onComplete) {
     const elapsed = (timestamp - physics.startTime) / 1000
 
     if (elapsed >= physics.duration / 1000) {
-      const index = activeAnimations.indexOf(animationId)
+      const index = activeAnimations.indexOf(handle)
       if (index !== -1) activeAnimations.splice(index, 1)
       const elIndex = activeElements.indexOf(physics.element)
       if (elIndex !== -1) activeElements.splice(elIndex, 1)
@@ -59,15 +65,15 @@ export function startPhysicsAnimation (physics, onComplete) {
     physics.element.style.transform = `translate(${physics.x}px, ${physics.y}px) rotate(${physics.rotation}deg) scale(${scale})`
     physics.element.style.opacity = physics.opacity
 
-    animationId = requestAnimationFrame(animate)
+    handle.id = requestAnimationFrame(animate)
   }
 
   if (physics.element && !activeElements.includes(physics.element)) {
     activeElements.push(physics.element)
   }
 
-  animationId = requestAnimationFrame(animate)
-  activeAnimations.push(animationId)
+  handle.id = requestAnimationFrame(animate)
+  activeAnimations.push(handle)
 }
 
 export function createExplosionPhysics (element = null) {
@@ -109,12 +115,14 @@ export function explodeCellsGrid (activeDomCells, onComplete) {
     const delay = Math.max(0, Math.min(2000, getNormalRandom(MEAN_DELAY, STD_DEVIATION)))
 
     scheduleAnimation(() => {
-
       const physics = createExplosionPhysics()
 
       const cellRect = element.getBoundingClientRect()
       const cellStyle = window.getComputedStyle(element)
       element.style.visibility = 'hidden'
+      if (!hiddenElements.includes(element)) {
+        hiddenElements.push(element)
+      }
 
       const clone = document.createElement('div')
       clone.className = element.className
@@ -135,6 +143,8 @@ export function explodeCellsGrid (activeDomCells, onComplete) {
 
       startPhysicsAnimation(physics, () => {
         if (document.body.contains(clone)) document.body.removeChild(clone)
+        const hIdx = hiddenElements.indexOf(element)
+        if (hIdx !== -1) hiddenElements.splice(hIdx, 1)
         completedAnimations++
         if (completedAnimations === totalAnimations) {
           activeDomCells.forEach(cell => { cell.style.visibility = 'visible' })
