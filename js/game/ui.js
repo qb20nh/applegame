@@ -1,4 +1,4 @@
-import { ROWS, COLS, CELL_SIZE, GRID_GAP, GRID_PADDING, POINTER_TYPE_TOUCH } from './constants.js'
+import { CELL_SIZE, GRID_GAP, GRID_PADDING } from './constants.js'
 import { state } from './state.js'
 
 export const ui = {

@@ -7,17 +7,17 @@ export function flat (row, col, ROWS, COLS) {
 }
 
 export function halfSquare (row, col, ROWS, COLS) {
-  const [L, S, l, s] = longShort(ROWS, COLS, row, col)
+  const [L, , l] = longShort(ROWS, COLS, row, col)
   return l < (L / 2)
 }
 
 export function halfStripes (row, col, ROWS, COLS) {
-  const [L, S, l, s] = longShort(ROWS, COLS, row, col)
+  const [L, , l, s] = longShort(ROWS, COLS, row, col)
   return XOR(l < (L / 2), EVEN(s))
 }
 
 export function verticalStripes (row, col, ROWS, COLS) {
-  const [L, S, l, s] = longShort(ROWS, COLS, row, col)
+  const [, , l] = longShort(ROWS, COLS, row, col)
   return EVEN(l)
 }
 
@@ -31,12 +31,12 @@ export function donuts (row, col, ROWS, COLS) {
 }
 
 export function checker (row, col, ROWS, COLS) {
-  const [L, S, l, s] = longShort(ROWS, COLS, row, col)
+  const [, , l, s] = longShort(ROWS, COLS, row, col)
   return XOR(EVEN(l), EVEN(s))
 }
 
 export function diagonalStripes (row, col, ROWS, COLS) {
-  const [L, S, l, s] = longShort(ROWS, COLS, row, col)
+  const [, , l, s] = longShort(ROWS, COLS, row, col)
   return EVEN((l + s) / 2) || EVEN((l + s + 1) / 2)
 }
 

@@ -105,7 +105,7 @@ export function explodeCellsGrid (activeDomCells, onComplete) {
         if (document.body.contains(clone)) document.body.removeChild(clone)
         completedAnimations++
         if (completedAnimations === totalAnimations) {
-          activeDomCells.forEach(cell => cell.style.visibility = 'visible')
+          activeDomCells.forEach(cell => { cell.style.visibility = 'visible' })
           if (onComplete) onComplete()
         }
       })

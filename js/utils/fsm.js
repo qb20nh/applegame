@@ -27,9 +27,6 @@ export class FSM {
     const getValues = (o) => isMap(o) ? Array.from(o.values()) : Object.values(o)
     const getEntries = (o) => isMap(o) ? Array.from(o.entries()) : Object.entries(o)
     const get = (o, k) => isMap(o) ? o.get(k) : o[k]
-    const set = (o, k, v) => isMap(o) ? o.set(k, v) : o[k] = v
-    const hasKey = (o, key) => isMap(o) ? o.has(key) : Object.keys(o).includes(key)
-    const hasValue = (o, value) => isMap(o) ? o.has(value) : Object.values(o).includes(value)
 
     if (!transitionObject || typeof transitionObject !== 'object' || getKeys(transitionObject).length === 0) {
       throw new Error('전이 객체는 비어있을 수 없습니다.')

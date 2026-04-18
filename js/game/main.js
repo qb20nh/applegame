@@ -1,16 +1,15 @@
 import { Timer } from '../utils/timer.js'
 import { isLocalhost } from '../utils/util.js'
-import { ROWS, COLS, TARGET_SUM, TIME_LIMIT, COLORS, POINTER_TYPE_TOUCH, STAR_THRESHOLDS } from './constants.js'
-import { state, gameState, generateStageSeed } from './state.js'
+import { TIME_LIMIT, COLORS, STAR_THRESHOLDS, POINTER_TYPE_TOUCH } from './constants.js'
+import { state, generateStageSeed } from './state.js'
 import { ui } from './ui.js'
 import { getCellCoordinatesFromPosition, selectCellsInRange, clearSelection } from './input.js'
 import { startPhysicsAnimation, explodeCellsGrid, createExplosionPhysics } from './animations.js'
 
-const noop = () => {}
 const IS_LOCALHOST = isLocalhost()
 
 // Web Worker 초기화
-const gameWorker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
+const gameWorker = new window.Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
 
 // 전역 인터페이스 제공 (레거시 지원 및 디버깅)
 if (IS_LOCALHOST) {
@@ -143,8 +142,8 @@ function initTimers (limit) {
     })
   }, limit * 1000)
 
-  gameTimer.onStart(() => timerUIUpdateInterval = setInterval(updateTimerUI, 100))
-  gameTimer.onResume(() => timerUIUpdateInterval = setInterval(updateTimerUI, 100))
+  gameTimer.onStart(() => { timerUIUpdateInterval = setInterval(updateTimerUI, 100) })
+  gameTimer.onResume(() => { timerUIUpdateInterval = setInterval(updateTimerUI, 100) })
   gameTimer.onPause(() => clearInterval(timerUIUpdateInterval))
   gameTimer.onReset(() => clearInterval(timerUIUpdateInterval))
 }

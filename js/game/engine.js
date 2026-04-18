@@ -8,11 +8,11 @@ const SKEWED_DIGIT_WEIGHTS = [
   0.1399745918951814,
   0.1200313160176022,
   0.1074289990042504,
-  0.09933762576923556,
-  0.09415776255794744,
-  0.09087548000721379,
-  0.08854629768368405,
-  0.08728762747758218
+  0.0993376257692355,
+  0.0941577625579474,
+  0.0908754800072137,
+  0.0885462976836840,
+  0.0872876274775821
 ]
 const DIGIT_MIN = 1
 const DIGIT_MAX = 9
@@ -176,7 +176,7 @@ export class GameEngine {
   isDuplicateHint (hints, cells) {
     return hints.some(hint =>
       hint.length === cells.length &&
-            hint.every(cell => cells.some(c => c.row === cell.row && c.col === cell.col))
+      hint.every(cell => cells.some(c => c.row === cell.row && c.col === cell.col))
     )
   }
 
@@ -214,8 +214,8 @@ export class GameEngine {
     }
 
     const isUsingHint = (isHintVisible && isMatch(currentHint, selectedCellCoords)) ||
-                           isMatch(lastVisibleHint, selectedCellCoords) ||
-                           isMatch(secondLastVisibleHint, selectedCellCoords)
+      isMatch(lastVisibleHint, selectedCellCoords) ||
+      isMatch(secondLastVisibleHint, selectedCellCoords)
 
     if (isUsingHint && this.gameMode !== 'zen') {
       multiplier = 1

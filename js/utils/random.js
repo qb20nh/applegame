@@ -67,27 +67,27 @@ export function pseudoPermutation (n, input, rounds = 4, seed = 0) {
  */
 function feistelPermutation (x, m, rounds, n, seed) {
   // Split x into two parts: left and right.
-  const L_bits = Math.floor(m / 2)
-  const R_bits = m - L_bits
-  const R_mask = (1 << R_bits) - 1
+  const lBits = Math.floor(m / 2)
+  const rBits = m - lBits
+  const rMask = (1 << rBits) - 1
 
-  let L = x >> R_bits
-  let R = x & R_mask
+  let L = x >> rBits
+  let R = x & rMask
 
   // Derive keys using n, seed, and round number.
-  const keys = deriveKeys(n, rounds, R_bits, seed)
+  const keys = deriveKeys(n, rounds, rBits, seed)
 
   // Perform Feistel rounds.
   for (let round = 0; round < rounds; round++) {
     const newL = R
-    const f = feistelRoundFunction(R, keys[round], R_bits)
+    const f = feistelRoundFunction(R, keys[round], rBits)
     const newR = L ^ f
     L = newL
     R = newR
   }
 
   // Combine the left and right parts to form the final m-bit result.
-  return (L << R_bits) | (R & R_mask)
+  return (L << rBits) | (R & rMask)
 }
 
 /**
@@ -96,13 +96,13 @@ function feistelPermutation (x, m, rounds, n, seed) {
  *
  * @param {number} n - The current n value
  * @param {number} rounds - Number of rounds
- * @param {number} R_bits - Number of bits for the right half of the input
+ * @param {number} rBits - Number of bits for the right half of the input
  * @param {number} seed - Additional seed value
  * @returns {number[]} An array of keys for each round.
  */
-function deriveKeys (n, rounds, R_bits, seed) {
+function deriveKeys (n, rounds, rBits, seed) {
   const keys = []
-  const mask = (1 << R_bits) - 1
+  const mask = (1 << rBits) - 1
   for (let j = 0; j < rounds; j++) {
     // Mix n, seed, and the round number to produce a key.
     // The constants 0x45d9f3b and 0x119de1f3 are arbitrary mixing constants.

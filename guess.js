@@ -58,48 +58,48 @@ function optimize (fn, initial, options) {
 
     // Reflection step.
     const worst = simplex[n]
-    const x_r = []
+    const xr = []
     for (let j = 0; j < n; j++) {
-      x_r[j] = centroid[j] + alpha * (centroid[j] - worst[j])
+      xr[j] = centroid[j] + alpha * (centroid[j] - worst[j])
     }
-    const f_r = fn(x_r)
+    const fr = fn(xr)
 
-    if (f_r < fValues[0]) {
+    if (fr < fValues[0]) {
       // If reflection is better than the best, try expansion.
-      const x_e = []
+      const xe = []
       for (let j = 0; j < n; j++) {
-        x_e[j] = centroid[j] + gamma * (x_r[j] - centroid[j])
+        xe[j] = centroid[j] + gamma * (xr[j] - centroid[j])
       }
-      const f_e = fn(x_e)
-      if (f_e < f_r) {
-        simplex[n] = x_e
-        fValues[n] = f_e
+      const fe = fn(xe)
+      if (fe < fr) {
+        simplex[n] = xe
+        fValues[n] = fe
       } else {
-        simplex[n] = x_r
-        fValues[n] = f_r
+        simplex[n] = xr
+        fValues[n] = fr
       }
-    } else if (f_r < fValues[n - 1]) {
+    } else if (fr < fValues[n - 1]) {
       // Accept the reflection.
-      simplex[n] = x_r
-      fValues[n] = f_r
+      simplex[n] = xr
+      fValues[n] = fr
     } else {
       // Contraction step.
-      const x_c = []
-      if (f_r < fValues[n]) {
+      const xc = []
+      if (fr < fValues[n]) {
         // Outside contraction.
         for (let j = 0; j < n; j++) {
-          x_c[j] = centroid[j] + rho * (x_r[j] - centroid[j])
+          xc[j] = centroid[j] + rho * (xr[j] - centroid[j])
         }
       } else {
         // Inside contraction.
         for (let j = 0; j < n; j++) {
-          x_c[j] = centroid[j] + rho * (worst[j] - centroid[j])
+          xc[j] = centroid[j] + rho * (worst[j] - centroid[j])
         }
       }
-      const f_c = fn(x_c)
-      if (f_c < Math.min(f_r, fValues[n])) {
-        simplex[n] = x_c
-        fValues[n] = f_c
+      const fc = fn(xc)
+      if (fc < Math.min(fr, fValues[n])) {
+        simplex[n] = xc
+        fValues[n] = fc
       } else {
         // Shrink: move all vertices (except the best) toward the best vertex.
         for (let i = 1; i < simplex.length; i++) {

@@ -1,4 +1,4 @@
-import { ROWS, COLS, TARGET_SUM, POINTER_TYPE_TOUCH } from './constants.js'
+import { TARGET_SUM } from './constants.js'
 import { state } from './state.js'
 import { ui } from './ui.js'
 
