@@ -12,6 +12,7 @@ export const ui = {
   stageStarsElement: null,
   nextStageBtn: null,
   stageSelectBtn: null,
+  finalScoreElement: null,
   cellElements: {},
 
   initElements () {
@@ -25,6 +26,7 @@ export const ui = {
     this.stageStarsElement = document.getElementById('stage-stars')
     this.nextStageBtn = document.getElementById('next-stage-btn')
     this.stageSelectBtn = document.getElementById('stage-select-btn')
+    this.finalScoreElement = document.getElementById('final-score')
   },
 
   setGridCSS () {

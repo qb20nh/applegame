@@ -662,6 +662,7 @@ function endGame (message, isFrenzy = false) {
     ui.gameOverElement.style.display = 'flex'
     const msgEl = document.getElementById('game-over-message') || document.getElementById('result-message')
     if (msgEl) msgEl.textContent = message
+    if (ui.finalScoreElement) ui.finalScoreElement.textContent = state.score
     if (ui.stageSelectBtn) {
       ui.stageSelectBtn.textContent = isFrenzy ? '돌아가기' : '스테이지 선택'
     }
@@ -699,6 +700,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let activePointerId = null
   let isTwoFingerPanning = false
   let lastTwoFingerCenterX = null
+  let lastTwoFingerCenterY = null
   let resizeTimer = null
 
   const isPlayableCell = (cell) => {
@@ -779,6 +781,7 @@ document.addEventListener('DOMContentLoaded', () => {
       isTwoFingerPanning = true
       const [t1, t2] = e.touches
       lastTwoFingerCenterX = (t1.clientX + t2.clientX) / 2
+      lastTwoFingerCenterY = (t1.clientY + t2.clientY) / 2
       activePointerId = null
       state.isSelecting = false
       clearSelection()
@@ -798,11 +801,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const [t1, t2] = e.touches
     const centerX = (t1.clientX + t2.clientX) / 2
-    if (lastTwoFingerCenterX !== null) {
+    const centerY = (t1.clientY + t2.clientY) / 2
+    if (lastTwoFingerCenterX !== null && lastTwoFingerCenterY !== null) {
       const deltaX = centerX - lastTwoFingerCenterX
+      const deltaY = centerY - lastTwoFingerCenterY
       ui.gameGridElement.scrollLeft -= deltaX
+      ui.gameGridElement.scrollTop -= deltaY
     }
     lastTwoFingerCenterX = centerX
+    lastTwoFingerCenterY = centerY
     e.preventDefault()
   }, { passive: false })
 
@@ -810,6 +817,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.touches.length < 2) {
       isTwoFingerPanning = false
       lastTwoFingerCenterX = null
+      lastTwoFingerCenterY = null
     }
   }
 

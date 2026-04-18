@@ -94,7 +94,7 @@ h1 {
     place-items: center;
     /* 그리드 아이템을 중앙에 배치 */
     max-width: 100%;
-    overflow-x: auto;
+    overflow: auto;
 }
 
 .cell {
