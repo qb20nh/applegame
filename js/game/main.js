@@ -4,7 +4,7 @@ import { TIME_LIMIT, COLORS, STAR_THRESHOLDS, POINTER_TYPE_TOUCH } from './const
 import { state, generateStageSeed } from './state.js'
 import { ui } from './ui.js'
 import { getCellCoordinatesFromPosition, selectCellsInRange, clearSelection } from './input.js'
-import { startPhysicsAnimation, explodeCellsGrid, createExplosionPhysics } from './animations.js'
+import { startPhysicsAnimation, explodeCellsGrid, createExplosionPhysics, stopAllAnimations, scheduleAnimation } from './animations.js'
 
 const IS_LOCALHOST = isLocalhost()
 
@@ -217,7 +217,6 @@ const stageDialog = document.getElementById('stage-selection-dialog')
 const pauseMenuDialog = document.getElementById('pause-menu-dialog')
 const confirmationDialog = document.getElementById('confirmation-dialog')
 let pendingAction = null
-let fallingTimeoutIds = []
 
 function updateZenButtons () {
   const undoBtn = document.getElementById('undo-btn')
@@ -234,14 +233,8 @@ function updateZenButtons () {
   }
 }
 
-function clearFallingBlocks () {
-  fallingTimeoutIds.forEach(id => clearTimeout(id))
-  fallingTimeoutIds = []
-  document.querySelectorAll('.falling').forEach(el => el.remove())
-}
-
 function showModeSelection () {
-  clearFallingBlocks()
+  stopAllAnimations()
   if (gameTimer) gameTimer.reset()
   hintWaitTimer.reset()
   hintDisplayTimer.reset()
@@ -254,7 +247,7 @@ function showModeSelection () {
 }
 
 function showStageSelection () {
-  clearFallingBlocks()
+  stopAllAnimations()
   stageData.currentPage = 1
   if (stageDialog) stageDialog.scrollTop = 0
   const dialogContent = stageDialog?.querySelector('.dialog-content')
@@ -473,7 +466,7 @@ function updateTimerUI () {
 }
 
 function initGame () {
-  clearFallingBlocks()
+  stopAllAnimations()
   const isFrenzy = state.gameMode === 'frenzy'
   const isZen = isZenMode()
   const isTimed = !isZen
@@ -544,7 +537,7 @@ function handleValidationResult (result) {
 function revealUpdatesWithAnimation (updates) {
   const sortedUpdates = [...updates].sort((a, b) => (a.row !== b.row) ? a.row - b.row : a.col - b.col)
   sortedUpdates.forEach((upd, index) => {
-    const timeoutId = setTimeout(() => {
+    scheduleAnimation(() => {
       const cellEl = ui.cellElements[`${upd.row}-${upd.col}`]
       if (!cellEl) return
 
@@ -557,7 +550,6 @@ function revealUpdatesWithAnimation (updates) {
         zIndex: '1000',
         pointerEvents: 'none'
       })
-      clone.classList.add('falling')
       document.body.appendChild(clone)
 
       cellEl.textContent = upd.newValue || ''
@@ -571,7 +563,6 @@ function revealUpdatesWithAnimation (updates) {
       const physics = createExplosionPhysics(clone)
       startPhysicsAnimation(physics, () => clone.remove())
     }, index * 50)
-    fallingTimeoutIds.push(timeoutId)
   })
   clearSelection()
 }

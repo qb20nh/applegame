@@ -1,6 +1,31 @@
 import { state } from './state.js'
 
 export const activeAnimations = []
+export const pendingTimeouts = []
+export const activeElements = []
+
+export function scheduleAnimation (callback, delay) {
+  const timeoutId = setTimeout(() => {
+    const idx = pendingTimeouts.indexOf(timeoutId)
+    if (idx !== -1) pendingTimeouts.splice(idx, 1)
+    callback()
+  }, delay)
+  pendingTimeouts.push(timeoutId)
+  return timeoutId
+}
+
+export function stopAllAnimations () {
+  activeAnimations.forEach(id => cancelAnimationFrame(id))
+  activeAnimations.length = 0
+
+  pendingTimeouts.forEach(id => clearTimeout(id))
+  pendingTimeouts.length = 0
+
+  activeElements.forEach(el => {
+    if (el && el.parentNode) el.parentNode.removeChild(el)
+  })
+  activeElements.length = 0
+}
 
 export function startPhysicsAnimation (physics, onComplete) {
   physics.startTime = performance.now()
@@ -14,6 +39,8 @@ export function startPhysicsAnimation (physics, onComplete) {
     if (elapsed >= physics.duration / 1000) {
       const index = activeAnimations.indexOf(animationId)
       if (index !== -1) activeAnimations.splice(index, 1)
+      const elIndex = activeElements.indexOf(physics.element)
+      if (elIndex !== -1) activeElements.splice(elIndex, 1)
       onComplete()
       return
     }
@@ -33,6 +60,10 @@ export function startPhysicsAnimation (physics, onComplete) {
     physics.element.style.opacity = physics.opacity
 
     animationId = requestAnimationFrame(animate)
+  }
+
+  if (physics.element && !activeElements.includes(physics.element)) {
+    activeElements.push(physics.element)
   }
 
   animationId = requestAnimationFrame(animate)
@@ -77,7 +108,8 @@ export function explodeCellsGrid (activeDomCells, onComplete) {
   activeDomCells.forEach(element => {
     const delay = Math.max(0, Math.min(2000, getNormalRandom(MEAN_DELAY, STD_DEVIATION)))
 
-    setTimeout(() => {
+    scheduleAnimation(() => {
+
       const physics = createExplosionPhysics()
 
       const cellRect = element.getBoundingClientRect()
