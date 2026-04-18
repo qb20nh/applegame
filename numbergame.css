@@ -444,15 +444,18 @@ h1 {
 
 .stage-selection-notice {
     margin: 0;
-    min-height: 80dvh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     text-align: center;
     font-size: 24px;
     font-weight: 700;
     color: #333;
     padding: 0 24px;
+}
+
+.stage-selection-notice:not([hidden]) {
+    min-height: 80dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .stage-item {
@@ -563,9 +566,12 @@ h1 {
     }
 
     .stage-selection-notice {
-        min-height: 72dvh;
         font-size: 18px;
         padding: 0 10px;
+    }
+
+    .stage-selection-notice:not([hidden]) {
+        min-height: 72dvh;
     }
 
     /* 페이지네이션 모바일 대응 */
