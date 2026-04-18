@@ -1,13 +1,13 @@
-import { FSM } from './fsm.js';
-import { createEnum } from './enum.js';
-import { map } from './util.js';
+import { FSM } from './fsm.js'
+import { createEnum } from './enum.js'
+import { map } from './util.js'
 // 타이머 상태를 위한 Enum 정의
 export const TimerState = createEnum('TimerState', {
   IDLE: 'idle',
   RUNNING: 'running',
   PAUSED: 'paused',
   COMPLETED: 'completed'
-});
+})
 
 // 타이머 액션을 위한 Enum 정의
 export const TimerAction = createEnum('TimerAction', {
@@ -16,7 +16,7 @@ export const TimerAction = createEnum('TimerAction', {
   RESUME: 'resume',
   RESET: 'reset',
   COMPLETE: 'complete'
-});
+})
 
 /**
  * Timer 클래스
@@ -28,159 +28,159 @@ export class Timer {
    * @param {Function} callback - 타이머 종료 시 실행할 콜백 함수
    * @param {number} delay - 타이머 지연 시간 (밀리초)
    */
-  constructor(callback, delay) {
+  constructor (callback, delay) {
     // 기본 속성 설정
-    this.callback = callback;
-    this.initialDelay = delay;
-    this.remaining = delay;
-    
+    this.callback = callback
+    this.initialDelay = delay
+    this.remaining = delay
+
     // 상태 관리 변수
-    this.timerId = null;
-    this.startTime = null;
-    
+    this.timerId = null
+    this.startTime = null
+
     // FSM 초기화 - 상태 전이 모델 정의
-    
+
     this.fsm = FSM.simple(
       map()
-      .add(TimerState.IDLE, map()
-        .add(TimerAction.START, TimerState.RUNNING)
-      )
-      .add(TimerState.RUNNING, map()
-        .add(TimerAction.PAUSE, TimerState.PAUSED)
-        .add(TimerAction.COMPLETE, TimerState.COMPLETED)
-        .add(TimerAction.RESET, TimerState.IDLE)
-      )
-      .add(TimerState.PAUSED, map()
-        .add(TimerAction.RESUME, TimerState.RUNNING)
-        .add(TimerAction.RESET, TimerState.IDLE)
-      )
-      .add(TimerState.COMPLETED, map()
-        .add(TimerAction.RESET, TimerState.IDLE)
-      )
-      .build()
-    );
-    
+        .add(TimerState.IDLE, map()
+          .add(TimerAction.START, TimerState.RUNNING)
+        )
+        .add(TimerState.RUNNING, map()
+          .add(TimerAction.PAUSE, TimerState.PAUSED)
+          .add(TimerAction.COMPLETE, TimerState.COMPLETED)
+          .add(TimerAction.RESET, TimerState.IDLE)
+        )
+        .add(TimerState.PAUSED, map()
+          .add(TimerAction.RESUME, TimerState.RUNNING)
+          .add(TimerAction.RESET, TimerState.IDLE)
+        )
+        .add(TimerState.COMPLETED, map()
+          .add(TimerAction.RESET, TimerState.IDLE)
+        )
+        .build()
+    )
+
     // FSM 상태 변경 리스너 설정
     this.fsm.onTransition((from, action, to) => {
-      this.listeners[action].forEach(callback => callback(from, action, to));
-    });
-    
+      this.listeners[action].forEach(callback => callback(from, action, to))
+    })
+
     // 이벤트 리스너
-    this.listeners = Object.fromEntries(TimerAction.values().map(action => [action, []]));
+    this.listeners = Object.fromEntries(TimerAction.values().map(action => [action, []]))
   }
 
-  get state() {
-    return this.fsm.currentState.value;
+  get state () {
+    return this.fsm.currentState.value
   }
 
   /**
    * 타이머 시작
    * @returns {boolean} 타이머 시작 성공 여부
    */
-  start() {
+  start () {
     if (!this.fsm.executeAction(TimerAction.START)) {
-        return false;
+      return false
     }
-    
-    this.startTime = Date.now();
-    this.timerId = setTimeout(() => this.#complete(), this.remaining);
-    
-    return true;
+
+    this.startTime = Date.now()
+    this.timerId = setTimeout(() => this.#complete(), this.remaining)
+
+    return true
   }
 
   /**
    * 타이머 일시 정지
    * @returns {boolean} 타이머 일시 정지 성공 여부
    */
-  pause() {
+  pause () {
     if (!this.fsm.executeAction(TimerAction.PAUSE)) {
-        return false;
+      return false
     }
-    
-    clearTimeout(this.timerId);
-    this.timerId = null;
-    this.remaining -= Date.now() - this.startTime;
-    
-    return true;
+
+    clearTimeout(this.timerId)
+    this.timerId = null
+    this.remaining -= Date.now() - this.startTime
+
+    return true
   }
 
   /**
    * 일시 정지된 타이머 재개
    * @returns {boolean} 타이머 재개 성공 여부
    */
-  resume() {
+  resume () {
     if (!this.fsm.executeAction(TimerAction.RESUME)) {
-        return false;
+      return false
     }
-    
-    this.startTime = Date.now();
+
+    this.startTime = Date.now()
     if (this.timerId) {
-      throw new Error('Timer already started');
+      throw new Error('Timer already started')
     }
-    this.timerId = setTimeout(() => this.#complete(), this.remaining);
-    
-    return true;
+    this.timerId = setTimeout(() => this.#complete(), this.remaining)
+
+    return true
   }
 
   /**
    * 타이머 초기화 (초기 상태로 재설정)
    * @returns {boolean} 타이머 초기화 성공 여부
    */
-  reset() {
+  reset () {
     if (!this.fsm.executeAction(TimerAction.RESET)) {
-        return false;
+      return false
     }
-    
-    clearTimeout(this.timerId);
-    this.remaining = this.initialDelay;
-    this.timerId = null;
-    this.startTime = null;
-    
-    return true;
+
+    clearTimeout(this.timerId)
+    this.remaining = this.initialDelay
+    this.timerId = null
+    this.startTime = null
+
+    return true
   }
 
   /**
    * 타이머 완료 처리 (내부 메서드)
    * @private
    */
-  #complete() {
-      if (!this.fsm.executeAction(TimerAction.COMPLETE)) {
-        return;
+  #complete () {
+    if (!this.fsm.executeAction(TimerAction.COMPLETE)) {
+      return
+    }
+
+    this.timerId = null
+    this.remaining = 0
+
+    // 콜백 함수 실행
+    console.log('타이머 완료: 콜백 실행')
+    if (this.callback && typeof this.callback === 'function') {
+      try {
+        this.callback()
+      } catch (error) {
+        console.error('타이머 콜백 실행 중 오류:', error)
       }
-      
-      this.timerId = null;
-      this.remaining = 0;
-      
-      // 콜백 함수 실행
-      console.log('타이머 완료: 콜백 실행');
-      if (this.callback && typeof this.callback === 'function') {
-        try {
-          this.callback();
-        } catch (error) {
-          console.error('타이머 콜백 실행 중 오류:', error);
-        }
-      }
+    }
   }
 
   /**
    * 현재 타이머 상태 반환
    * @returns {string} 현재 상태
    */
-  getState() {
-    return this.fsm.currentState;
+  getState () {
+    return this.fsm.currentState
   }
 
   /**
    * 남은 시간 반환 (밀리초)
    * @returns {number} 남은 시간 (밀리초)
    */
-  getRemainingTime() {
+  getRemainingTime () {
     if (this.fsm.currentState === TimerState.RUNNING) {
-      const elapsed = Date.now() - this.startTime;
-      return Math.max(0, this.remaining - elapsed);
+      const elapsed = Date.now() - this.startTime
+      return Math.max(0, this.remaining - elapsed)
     }
-    
-    return this.remaining;
+
+    return this.remaining
   }
 
   /**
@@ -189,12 +189,11 @@ export class Timer {
    * @param {Function} callback - 콜백 함수
    * @returns {Function} 리스너 제거 함수
    */
-  on(event, callback) {
-    
-    (this.listeners[event] ??= []).push(callback);
-    
+  on (event, callback) {
+    (this.listeners[event] ??= []).push(callback)
+
     // 리스너 제거 함수 반환
-    return () => this.off(event, callback);
+    return () => this.off(event, callback)
   }
 
   /**
@@ -202,10 +201,10 @@ export class Timer {
    * @param {TimerAction} event - 이벤트 이름
    * @param {Function} callback - 콜백 함수
    */
-  off(event, callback) {
-    const index = this.listeners[event].indexOf(callback);
+  off (event, callback) {
+    const index = this.listeners[event].indexOf(callback)
     if (index !== -1) {
-      this.listeners[event].splice(index, 1);
+      this.listeners[event].splice(index, 1)
     }
   }
 
@@ -214,8 +213,8 @@ export class Timer {
    * @param {Function} callback - 콜백 함수
    * @returns {Function} 리스너 제거 함수
    */
-  onStart(callback) {
-    return this.on(TimerAction.START, callback);
+  onStart (callback) {
+    return this.on(TimerAction.START, callback)
   }
 
   /**
@@ -223,8 +222,8 @@ export class Timer {
    * @param {Function} callback - 콜백 함수
    * @returns {Function} 리스너 제거 함수
    */
-  onPause(callback) {
-    return this.on(TimerAction.PAUSE, callback);
+  onPause (callback) {
+    return this.on(TimerAction.PAUSE, callback)
   }
 
   /**
@@ -232,8 +231,8 @@ export class Timer {
    * @param {Function} callback - 콜백 함수
    * @returns {Function} 리스너 제거 함수
    */
-  onResume(callback) {
-    return this.on(TimerAction.RESUME, callback);
+  onResume (callback) {
+    return this.on(TimerAction.RESUME, callback)
   }
 
   /**
@@ -241,8 +240,8 @@ export class Timer {
    * @param {Function} callback - 콜백 함수
    * @returns {Function} 리스너 제거 함수
    */
-  onEnd(callback) {
-    return this.on(TimerAction.COMPLETE, callback);
+  onEnd (callback) {
+    return this.on(TimerAction.COMPLETE, callback)
   }
 
   /**
@@ -250,8 +249,8 @@ export class Timer {
    * @param {Function} callback - 콜백 함수
    * @returns {Function} 리스너 제거 함수
    */
-  onReset(callback) {
-    return this.on(TimerAction.RESET, callback);
+  onReset (callback) {
+    return this.on(TimerAction.RESET, callback)
   }
 
   /**
@@ -259,12 +258,12 @@ export class Timer {
    * @param {Timer} other - 다음 타이머
    * @returns {Function} 리스너 제거 함수
    */
-  then(other) {
+  then (other) {
     this.onEnd(() => {
-        other.reset();
-        other.start();
-    });
-    return this;
+      other.reset()
+      other.start()
+    })
+    return this
   }
 }
 
@@ -274,6 +273,6 @@ export class Timer {
  * @param {number} delay - 타이머 지연 시간 (밀리초)
  * @returns {Timer} 생성된 타이머 인스턴스
  */
-export function createTimer(callback, delay) {
-  return new Timer(callback, delay);
+export function createTimer (callback, delay) {
+  return new Timer(callback, delay)
 }
