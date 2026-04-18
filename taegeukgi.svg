@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 720" width="1080" height="720">
+  <rect width="1080" height="720" fill="#FFFFFF"/>
+  
+  <g transform="translate(540, 360)">
+    
+    <g transform="rotate(33.6900675)">
+      <path d="M -180,0 A 180 180 0 0 1 180,0 Z" fill="#CD313A"/>
+      <path d="M -180,0 A 180 180 0 0 0 180,0 Z" fill="#0047A0"/>
+      <circle cx="-90" cy="0" r="90" fill="#CD313A"/>
+      <circle cx="90" cy="0" r="90" fill="#0047A0"/>
+    </g>
+
+    <defs>
+      <g id="solid">
+        <rect x="0" y="-90" width="30" height="180" fill="#000000"/>
+      </g>
+      <g id="broken">
+        <rect x="0" y="-90" width="30" height="82.5" fill="#000000"/>
+        <rect x="0" y="7.5" width="30" height="82.5" fill="#000000"/>
+      </g>
+      
+      <g id="geon">
+        <use href="#solid" x="0"/>
+        <use href="#solid" x="45"/>
+        <use href="#solid" x="90"/>
+      </g>
+      <g id="gon">
+        <use href="#broken" x="0"/>
+        <use href="#broken" x="45"/>
+        <use href="#broken" x="90"/>
+      </g>
+      <g id="gam">
+        <use href="#broken" x="0"/>
+        <use href="#solid" x="45"/>
+        <use href="#broken" x="90"/>
+      </g>
+      <g id="ri">
+        <use href="#solid" x="0"/>
+        <use href="#broken" x="45"/>
+        <use href="#solid" x="90"/>
+      </g>
+    </defs>
+
+    <g transform="rotate(-146.3099325) translate(270, 0)">
+      <use href="#geon"/>
+    </g>
+    
+    <g transform="rotate(33.6900675) translate(270, 0)">
+      <use href="#gon"/>
+    </g>
+    
+    <g transform="rotate(-33.6900675) translate(270, 0)">
+      <use href="#gam"/>
+    </g>
+    
+    <g transform="rotate(146.3099325) translate(270, 0)">
+      <use href="#ri"/>
+    </g>
+  </g>
+</svg>

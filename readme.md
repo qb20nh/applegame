@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="taegeukgi.svg" alt="Taegeukgi" height="64" border="1">
+</p>
 이 게임은 "넘버 게임: 10 만들기"(Number Game: Make 10)라는 격자 기반 퍼즐 게임입니다.
 게임 개요:
 10×20 크기의 격자판에 1~9 사이의 숫자들이 배치되어 있습니다.
