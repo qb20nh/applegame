@@ -351,7 +351,7 @@ function generateStages () {
           } else if (zenData.hi === zenData.lo) {
             scoreLabel.textContent = `🏆${zenData.hi}`
           } else {
-            scoreLabel.textContent = `🏆${zenData.hi}/${zenData.lo} (hi/lo)`
+            scoreLabel.textContent = `🏆${zenData.hi}/${zenData.lo}`
           }
           starsContainer.appendChild(scoreLabel)
         } else {
